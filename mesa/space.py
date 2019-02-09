@@ -82,7 +82,10 @@ class Grid:
         self.width = width
         self.torus = torus
 
+        #Rather than create the grid cells as a python list and then manipulate
+        #items within the list, as well as the list itself, it is faster to index.
         self.grid = []
+        #self.grid_lookup = {}
 
         for x in range(self.width):
             col = []
