@@ -70,6 +70,8 @@ class Grid:
 
     """
 
+    DEFAULT_VALUE = None
+
     def __init__(self, width, height, torus):
         """ Create a new grid.
 
@@ -82,39 +84,34 @@ class Grid:
         self.width = width
         self.torus = torus
 
-        #Rather than create the grid cells as a python list and then manipulate
-        #items within the list, as well as the list itself, it is faster to index.
-        self.grid = []
-        #self.grid_lookup = {}
-
-        for x in range(self.width):
-            col = []
-            for y in range(self.height):
-                col.append(self.default_val())
-            self.grid.append(col)
+        self.grid = np.empty((self.width, self.height), dtype='object')
 
         # Add all cells to the empties list.
-        self.empties = list(itertools.product(
-            *(range(self.width), range(self.height))))
+        self.empties = dict.fromkeys(itertools.product(*(range(self.width), range(self.height))))
+
+        #Toying with idea of caching last neighborhood search params, to speed
+        #up sequential searches...
+        #self.last_radius = 0
+        #self.last_moore = True
+        #self.last_include_center = True
+        #self.last_neighborhood_block = None
 
     @staticmethod
     def default_val():
         """ Default value for new cell elements. """
-        return None
+        return Grid.DEFAULT_VALUE
 
     def __getitem__(self, index):
         return self.grid[index]
 
     def __iter__(self):
-        # create an iterator that chains the
-        #  rows of grid together as if one list:
-        return itertools.chain(*self.grid)
+        return self.grid.flat
 
     def coord_iter(self):
         """ An iterator that returns coordinates as well as cell contents. """
         for row in range(self.width):
             for col in range(self.height):
-                yield self.grid[row][col], row, col  # agent, x, y
+                yield self.grid[row, col], row, col  # agent, x, y
 
     def neighbor_iter(self, pos, moore=True):
         """ Iterate over position neighbors.
@@ -128,6 +125,10 @@ class Grid:
         neighborhood = self.iter_neighborhood(pos, moore=moore)
         return self.iter_cell_list_contents(neighborhood)
 
+
+    ##
+    ## Deal with neighborhoods...
+    ##
     def iter_neighborhood(self, pos, moore,
                           include_center=False, radius=1):
         """ Return an iterator over cell coordinates that are in the
@@ -150,29 +151,63 @@ class Grid:
             including the center).
 
         """
-        x, y = pos
-        coordinates = set()
-        for dy in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                if dx == 0 and dy == 0 and not include_center:
-                    continue
-                # Skip coordinates that are outside manhattan distance
-                if not moore and abs(dx) + abs(dy) > radius:
-                    continue
-                # Skip if not a torus and new coords out of bounds.
-                if not self.torus and (not (0 <= dx + x < self.width) or not (0 <= dy + y < self.height)):
-                    continue
+        for n in self.get_neighborhood(pos, moore, include_center, radius):
+            yield n
 
-                px, py = self.torus_adj((x + dx, y + dy))
+    def _get_bounds(self, pos, radius):
+        minx, maxx = pos[0] - radius, pos[0] + radius + 1
+        miny, maxy = pos[1] - radius, pos[1] + radius + 1
 
-                # Skip if new coords out of bounds.
-                if self.out_of_bounds((px, py)):
-                    continue
+        on_edge = False
+        if not self.torus:
+            if minx < 0:
+                on_edge = True
+                minx = 0
+            if miny < 0:
+                on_edge = True
+                miny = 0
+            if maxx > self.width:
+                on_edge = True
+                maxx = self.width
+            if maxy > self.height:
+                on_edge = True
+                maxy = self.height
 
-                coords = (px, py)
-                if coords not in coordinates:
-                    coordinates.add(coords)
-                    yield coords
+        return minx, maxx, miny, maxy, on_edge
+
+    def _get_neighborhood(self, pos, moore, include_center, radius):
+        minx, maxx, miny, maxy, on_edge =  self._get_bounds(pos, radius)
+
+        x = np.repeat(np.arange(minx, maxx), maxy-miny)
+        y = np.tile(np.arange(miny, maxy), maxx-minx)
+
+        inds = np.stack((x.T, y.T), 1)
+        #print("----Creating inds----")
+        #print(inds)
+        if not moore:
+            manhattans = np.sum(np.abs(inds - pos), axis=1)
+            inds = inds[manhattans <= radius]
+        #print(inds)
+        if len(inds) > 0 and not include_center:
+            inds = np.delete(inds, len(inds)//2, axis=0)
+        #print(inds)
+        #print(self.width, self.height)
+        if self.torus:
+            inds[:,0] = np.remainder(inds[:,0], self.width)
+            inds[:,1] = np.remainder(inds[:,1], self.height)
+        #print("----Created inds----")
+
+        #if not on_edge and (self.last_moore != moore or self.last_radius != radius or \
+        #    self.last_include_center != include_center) and self.last_neighborhood_block is not None:
+        #    inds = self.last_neighborhood_block + pos
+        #else:
+        #    inds = self._build_inds(minx, maxx, miny, maxy, moore, include_center)
+        #
+        #    if self.last_neighborhood_block is None and not on_edge:
+        #        self.last_neighborhood_block = inds - pos
+
+        inds = np.unique(inds.view(dtype=[('a', 'int'), ('b', 'int')])).view(dtype='int').reshape( -1, 2 )
+        return inds[:,0], inds[:,1]
 
     def get_neighborhood(self, pos, moore,
                          include_center=False, radius=1):
@@ -195,8 +230,13 @@ class Grid:
             if not including the center).
 
         """
-        return list(self.iter_neighborhood(pos, moore, include_center, radius))
+        xs, ys = self._get_neighborhood(pos, moore, include_center, radius)
+        return list(zip(list(xs), list(ys)))
 
+
+    ##
+    ## Deal with neighbors...
+    ##
     def iter_neighbors(self, pos, moore,
                        include_center=False, radius=1):
         """ Return an iterator over neighbors to a certain point.
@@ -216,11 +256,10 @@ class Grid:
             An iterator of non-None objects in the given neighborhood;
             at most 9 if Moore, 5 if Von-Neumann
             (8 and 4 if not including the center).
-
         """
-        neighborhood = self.iter_neighborhood(
-            pos, moore, include_center, radius)
-        return self.iter_cell_list_contents(neighborhood)
+
+        for n in self.get_neighbors(pos, moore, include_center, radius):
+            yield n
 
     def get_neighbors(self, pos, moore,
                       include_center=False, radius=1):
@@ -243,8 +282,11 @@ class Grid:
             (8 and 4 if not including the center).
 
         """
-        return list(self.iter_neighbors(
-            pos, moore, include_center, radius))
+        nhood = self._get_neighborhood(pos, moore, include_center, radius)
+        ret = self.grid[nhood]
+        ret = ret[np.logical_and(ret != self.default_val(), ret != np.array(None))]
+
+        return ret
 
     def torus_adj(self, pos):
         """ Convert coordinate, handling torus looping. """
@@ -275,7 +317,7 @@ class Grid:
 
         """
         return (
-            self[x][y] for x, y in cell_list if not self.is_cell_empty((x, y)))
+            self.grid[x, y] for x, y in cell_list if not self.is_cell_empty((x, y)))
 
     @accept_tuple_argument
     def get_cell_list_contents(self, cell_list):
@@ -311,10 +353,9 @@ class Grid:
 
     def _place_agent(self, pos, agent):
         """ Place the agent at the correct location. """
-        x, y = pos
-        self.grid[x][y] = agent
+        self.grid[pos[0], pos[1]] = agent
         if pos in self.empties:
-            self.empties.remove(pos)
+            del self.empties[pos]
 
     def remove_agent(self, agent):
         """ Remove the agent from the grid and set its pos variable to None. """
@@ -324,27 +365,28 @@ class Grid:
 
     def _remove_agent(self, pos, agent):
         """ Remove the agent from the given location. """
-        x, y = pos
-        self.grid[x][y] = None
-        self.empties.append(pos)
+        self.grid[pos[0], pos[1]] = None
+        self.empties[pos] = None
 
     def is_cell_empty(self, pos):
         """ Returns a bool of the contents of a cell. """
-        x, y = pos
-        return True if self.grid[x][y] == self.default_val() else False
+        #Hrmm... This will break if not None
+        return self.grid[pos[0], pos[1]] is self.default_val()
 
-    def move_to_empty(self, agent):
+    def move_to_empty(self, agent, closest=False, moore=True, max_radius=None):
         """ Moves agent to a random empty cell, vacating agent's old cell. """
         pos = agent.pos
-        if len(self.empties) == 0:
+        new_pos = self.find_empty(agent.random, pos, closest=closest, moore=moore,
+                    max_radius=max_radius)
+        if new_pos is None:
             raise Exception("ERROR: No empty cells")
-        new_pos = agent.random.choice(self.empties)
         self._place_agent(new_pos, agent)
         agent.pos = new_pos
         self._remove_agent(pos, agent)
 
-    def find_empty(self):
-        """ Pick a random empty cell. """
+    def find_empty(self, passed_random=None, pos=None, closest=False, moore=True,
+            max_radius=None):
+        """ Pick a random empty cell, subject to constraints. """
         from warnings import warn
         import random
 
@@ -354,8 +396,20 @@ class Grid:
               "explicitly pick one of the grid's list of empty cells."),
             DeprecationWarning)
 
-        if self.exists_empty_cells():
-            pos = random.choice(self.empties)
+        if pos is not None and max_radius is not None and max_radius > 0:
+            empties = get_neighborhood(pos, moore,
+                                 include_center=False, radius=max_radius)
+            empties = set(empties).intersect(self.empties.keys())
+        else:
+            empties = self.empties
+
+        #Why not provide "default" random behavior as follows?
+        if len(empties) > 0:
+            if passed_random is None:
+                pos = random.choice(list(self.empties.keys()))
+            else:
+                pos = passed_random.choice(list(self.empties.keys()))
+
             return pos
         else:
             return None
@@ -367,7 +421,7 @@ class Grid:
 
 class SingleGrid(Grid):
     """ Grid where each cell contains exactly at most one object. """
-    empties = []
+    #empties = []
 
     def __init__(self, width, height, torus):
         """ Create a new single-item grid.
@@ -392,7 +446,7 @@ class SingleGrid(Grid):
         if x == "random" or y == "random":
             if len(self.empties) == 0:
                 raise Exception("ERROR: Grid full")
-            coords = agent.random.choice(self.empties)
+            coords = agent.random.choice(list(self.empties.keys()))
         else:
             coords = (x, y)
         agent.pos = coords
@@ -430,19 +484,25 @@ class MultiGrid(Grid):
         """ Default value for new cell elements. """
         return set()
 
+    def is_cell_empty(self, pos):
+        """ Returns a bool of the contents of a cell. """
+        return self.grid[pos[0], pos[1]] is None or len(self.grid[pos[0], pos[1]]) == 0
+
     def _place_agent(self, pos, agent):
         """ Place the agent at the correct location. """
-        x, y = pos
-        self.grid[x][y].add(agent)
+        if self.grid[pos[0], pos[1]] is None:
+            self.grid[pos[0], pos[1]] = self.default_val()
+        self.grid[pos[0], pos[1]].add(agent)
         if pos in self.empties:
-            self.empties.remove(pos)
+            del self.empties[pos]
 
     def _remove_agent(self, pos, agent):
         """ Remove the agent from the given location. """
-        x, y = pos
-        self.grid[x][y].remove(agent)
-        if self.is_cell_empty(pos):
-            self.empties.append(pos)
+        if not self.is_cell_empty(pos):
+            self.grid[pos[0], pos[1]].remove(agent)
+            # Why was I doing this... so I don't have e.g. 500K empty sets, maybe?
+            #if len(self.grid[pos[0], pos[1]]) == 0:
+            #    self.empties[pos] = None
 
     @accept_tuple_argument
     def iter_cell_list_contents(self, cell_list):
@@ -455,7 +515,12 @@ class MultiGrid(Grid):
 
         """
         return itertools.chain.from_iterable(
-            self[x][y] for x, y in cell_list if not self.is_cell_empty((x, y)))
+            self.grid[x, y] for x, y in cell_list if not self.is_cell_empty((x, y)))
+
+    def get_neighbors(self, pos, moore,
+                      include_center=False, radius=1):
+        ret = super().get_neighbors(pos, moore, include_center, radius)
+        return set().union(*ret)
 
 
 class HexGrid(Grid):
