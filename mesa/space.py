@@ -34,7 +34,19 @@ def accept_tuple_argument(wrapped_function):
 
     return wrapper
 
-
+#
+# Numpy-based Grid
+# Using the model and agent from the tutorial as a test
+# %timeit MoneyModel(2500, 100, 100) results in 1.31s execution for the orginal,
+#   but a 42.4 ms execution for the Numpy-based grid.
+#
+# %timeit for i in range(100): model.step() results in 2'45" execution for the
+#   orginal, but a 1'3" execution for the Numpy-based grid.
+#
+# This is all without any profiling or deep though on the now somewhat tangled
+# Numpy-, list/tuple-, and iterator- based calls.  Breaking backward compatability
+# and making this pure Numpy would probably be faster still.
+#
 class Grid:
     """ Base class for a square grid.
 
