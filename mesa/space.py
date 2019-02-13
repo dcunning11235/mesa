@@ -43,9 +43,16 @@ def accept_tuple_argument(wrapped_function):
 # %timeit for i in range(100): model.step() results in 2'45" execution for the
 #   orginal, but a 1'3" execution for the Numpy-based grid.
 #
-# This is all without any profiling or deep though on the now somewhat tangled
-# Numpy-, list/tuple-, and iterator- based calls.  Breaking backward compatability
-# and making this pure Numpy would probably be faster still.
+# Adding in 'neighborhood caching' where last_neighborhood_block stores offsets
+# last used (if not on the edge) and corresponding values for moore,
+# include_center, and radius.  Result:
+# %timeit for i in range(100): model.step() has 40.7 s execution (down from the
+# original 2'45", or a 4x speed up.)
+#
+#
+# This is without any deep though on the now somewhat tangled Numpy-,
+# list/tuple-, and iterator- based calls.  Breaking backward compatability and
+# making this pure Numpy would probably be faster still.
 #
 class Grid:
     """ Base class for a square grid.
@@ -101,12 +108,10 @@ class Grid:
         # Add all cells to the empties list.
         self.empties = dict.fromkeys(itertools.product(*(range(self.width), range(self.height))))
 
-        #Toying with idea of caching last neighborhood search params, to speed
-        #up sequential searches...
-        #self.last_radius = 0
-        #self.last_moore = True
-        #self.last_include_center = True
-        #self.last_neighborhood_block = None
+        self.last_radius = 0
+        self.last_moore = True
+        self.last_include_center = True
+        self.last_neighborhood_block = None
 
     @staticmethod
     def default_val():
@@ -190,35 +195,35 @@ class Grid:
     def _get_neighborhood(self, pos, moore, include_center, radius):
         minx, maxx, miny, maxy, on_edge =  self._get_bounds(pos, radius)
 
-        x = np.repeat(np.arange(minx, maxx), maxy-miny)
-        y = np.tile(np.arange(miny, maxy), maxx-minx)
+        if not on_edge and self.last_neighborhood_block is not None and \
+                self.last_moore == moore and self.last_radius == radius and \
+                self.last_include_center == include_center:
+            inds = self.last_neighborhood_block + pos
+        else:
+            x = np.repeat(np.arange(minx, maxx), maxy-miny)
+            y = np.tile(np.arange(miny, maxy), maxx-minx)
+            inds = np.stack((x.T, y.T), 1)
 
-        inds = np.stack((x.T, y.T), 1)
-        #print("----Creating inds----")
-        #print(inds)
-        if not moore:
-            manhattans = np.sum(np.abs(inds - pos), axis=1)
-            inds = inds[manhattans <= radius]
-        #print(inds)
-        if len(inds) > 0 and not include_center:
-            inds = np.delete(inds, len(inds)//2, axis=0)
-        #print(inds)
-        #print(self.width, self.height)
-        if self.torus:
-            inds[:,0] = np.remainder(inds[:,0], self.width)
-            inds[:,1] = np.remainder(inds[:,1], self.height)
-        #print("----Created inds----")
+            if not moore:
+                manhattans = np.sum(np.abs(inds - pos), axis=1)
+                inds = inds[manhattans <= radius]
+            if len(inds) > 0 and not include_center:
+                inds = np.delete(inds, len(inds)//2, axis=0)
+            if self.torus:
+                inds[:,0] = np.remainder(inds[:,0], self.width)
+                inds[:,1] = np.remainder(inds[:,1], self.height)
 
-        #if not on_edge and (self.last_moore != moore or self.last_radius != radius or \
-        #    self.last_include_center != include_center) and self.last_neighborhood_block is not None:
-        #    inds = self.last_neighborhood_block + pos
-        #else:
-        #    inds = self._build_inds(minx, maxx, miny, maxy, moore, include_center)
-        #
-        #    if self.last_neighborhood_block is None and not on_edge:
-        #        self.last_neighborhood_block = inds - pos
+            if not on_edge and ((self.last_moore != moore or \
+                    self.last_radius != radius or \
+                    self.last_include_center != include_center) or \
+                    self.last_neighborhood_block is None):
+                self.last_radius = radius
+                self.last_include_center = include_center
+                self.last_moore = moore
+                self.last_neighborhood_block = inds - pos
 
-        inds = np.unique(inds.view(dtype=[('a', 'int'), ('b', 'int')])).view(dtype='int').reshape( -1, 2 )
+        if inds.size > 0:
+            inds = np.unique(inds, axis=0)
         return inds[:,0], inds[:,1]
 
     def get_neighborhood(self, pos, moore,
