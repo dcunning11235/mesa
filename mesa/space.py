@@ -153,7 +153,7 @@ class Grid:
 
         Args:
             pos: Coordinate tuple for the neighborhood to get.
-            moore: If True, return Moore neighborhood
+            moore: If True, return Moore narreighborhood
                         (including diagonals)
                    If False, return Von Neumann neighborhood
                         (exclude diagonals)
@@ -224,7 +224,8 @@ class Grid:
 
         if inds.size > 0:
             inds = np.unique(inds, axis=0)
-        return inds[:,0], inds[:,1]
+        #return inds[:,0], inds[:,1]
+        return inds
 
     def get_neighborhood(self, pos, moore,
                          include_center=False, radius=1):
@@ -247,8 +248,8 @@ class Grid:
             if not including the center).
 
         """
-        xs, ys = self._get_neighborhood(pos, moore, include_center, radius)
-        return list(zip(list(xs), list(ys)))
+        inds = self._get_neighborhood(pos, moore, include_center, radius)
+        return list(map(tuple, inds))
 
 
     ##
