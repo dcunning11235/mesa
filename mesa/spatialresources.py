@@ -25,7 +25,7 @@ class PropertyGrid:
 
 
 class FunctionPropertyGrid(PropertyGrid):
-    def __init__(self, height, width, torus, property_name, function, cummulative=True):
+    def __init__(self, height, width, torus, property_name, function):
         """ Create a new Property grid.  A grid that has zero or more simple
         properties associated with each grid cell.  E.g. 'elevation', expressed
         as some fixed number, or 'rainfall' expressed as a callable which takes
@@ -42,14 +42,10 @@ class FunctionPropertyGrid(PropertyGrid):
         self.width = width
         self.height = height
         self.function = function
-        self.cummulative = cummulative
         #self.grid = function(self.width, self.height, 0, None)
 
     def step(self, time):
-        if self.cummulative:
-            self.grid += self.function(self.width, self.height, time, self.grid)
-        else:
-            self.grid = self.function(self.width, self.height, time, self.grid)
+        self.grid = self.function(self.width, self.height, time, self.grid)
 
 
 class IrregularFunctionPropertyGrid(PropertyGrid):
@@ -60,7 +56,7 @@ class IrregularFunctionPropertyGrid(PropertyGrid):
             ret[index] = functions_grid[index](time, index)
         return ret
 
-    def __init__(self, height, width, torus, property_type, functions_grid, cummulative=True):
+    def __init__(self, height, width, torus, property_type, functions_grid):
         """ Create a new Property grid.  A grid that has zero or more simple
         properties associated with each grid cell.  E.g. 'elevation', expressed
         as some fixed number, or 'rainfall' expressed as a callable which takes
@@ -76,12 +72,8 @@ class IrregularFunctionPropertyGrid(PropertyGrid):
         super().__init__(torus, property_name, _call_grid(functions_grid, 0, None))
         self.width = width
         self.height = height
-        self.cummulative = cummulative
         self.functions_grid = functions_grid
         #self.grid = _call_grid(self.functions_grid, 0, None)
 
     def step(self, time):
-        if self.cummulative:
-            self.grid += _call_grid(self.functions_grid, time, self.grid)
-        else:
-            self.grid = _call_grid(self.functions_grid, time, self.grid)
+        self.grid = _call_grid(self.functions_grid, time, self.grid)
