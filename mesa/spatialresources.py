@@ -1,3 +1,5 @@
+import numpy as np
+
 from functools import partial
 
 class PropertyGrid:
@@ -15,9 +17,15 @@ class PropertyGrid:
     def get_property_at(self, pos):
         return self.property_name, self.grid[pos]
 
+    def set_property_at(self, pos, value):
+        self.grid[pos] = value
+
+    def update_property_at(self, pos, value):
+        self.grid[pos] += value
+
 
 class FunctionPropertyGrid(PropertyGrid):
-    def __init__(self, height, width, torus, property_name, function):
+    def __init__(self, height, width, torus, property_name, function, cummulative=True):
         """ Create a new Property grid.  A grid that has zero or more simple
         properties associated with each grid cell.  E.g. 'elevation', expressed
         as some fixed number, or 'rainfall' expressed as a callable which takes
@@ -30,13 +38,18 @@ class FunctionPropertyGrid(PropertyGrid):
             torus: Boolean whether the grid wraps or not.
             allowed_property_types:  iterable of allowed property types (name)
         """
-        super().__init__(torus, property_name, function(0, (width, height)))
+        super().__init__(torus, property_name, function(width, height, 0, None))
         self.width = width
         self.height = height
         self.function = function
+        self.cummulative = cummulative
+        #self.grid = function(self.width, self.height, 0, None)
 
     def step(self, time):
-        self.grid = function(self.width, self.height, time)
+        if self.cummulative:
+            self.grid += self.function(self.width, self.height, time, self.grid)
+        else:
+            self.grid = self.function(self.width, self.height, time, self.grid)
 
 
 class IrregularFunctionPropertyGrid(PropertyGrid):
@@ -47,7 +60,7 @@ class IrregularFunctionPropertyGrid(PropertyGrid):
             ret[index] = functions_grid[index](time, index)
         return ret
 
-    def __init__(self, height, width, torus, property_type, functions_grid):
+    def __init__(self, height, width, torus, property_type, functions_grid, cummulative=True):
         """ Create a new Property grid.  A grid that has zero or more simple
         properties associated with each grid cell.  E.g. 'elevation', expressed
         as some fixed number, or 'rainfall' expressed as a callable which takes
@@ -60,10 +73,15 @@ class IrregularFunctionPropertyGrid(PropertyGrid):
             torus: Boolean whether the grid wraps or not.
             allowed_property_types:  iterable of allowed property types (name)
         """
-        super().__init__(torus, property_name, _call_grid(functions_grid, 0))
+        super().__init__(torus, property_name, _call_grid(functions_grid, 0, None))
         self.width = width
         self.height = height
+        self.cummulative = cummulative
         self.functions_grid = functions_grid
+        #self.grid = _call_grid(self.functions_grid, 0, None)
 
     def step(self, time):
-        self.grid = _call_grid(self.functions_grid, time)
+        if self.cummulative:
+            self.grid += _call_grid(self.functions_grid, time, self.grid)
+        else:
+            self.grid = _call_grid(self.functions_grid, time, self.grid)
