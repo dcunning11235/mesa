@@ -11,7 +11,18 @@ CellContent = Set[Any]
 LayeredPosition = Tuple[string, Position]
 LayeredContent = Dict[str, Content]
 
-
+'''
+Other things _AbstractSpace and subclasses might have:
+    Grid:  Max occupancy (1, inf, 7, etc.)
+    LayeredSpace:  Max occupancy (1, inf, 7, etc.) by some type (e.g. 2 Agents
+                    are allowed across all layers, but maybe inf content.)
+    NOTE: Maybe the above two point to a need for some general "consistency checks"
+        functionality, e.g. a function that the user can pass in to a space that
+        is called whenever a cell/node/etc. has its contents (Agents, Contents,
+        etc.) updated.  The function would have a signature like:
+        consisitency_check(space, position) -> bool where a False vetos the change
+        and a True allows it.
+'''
 class _AbstractSpace(ABC):
     @abstractmethod
     def __init__(self) -> None:
@@ -139,6 +150,14 @@ class LayeredSpace(_AbstractSpace):
 
     How would different spaces stack together?  How would a grid and network stack?
     Are there any special considerations there, anything we want to make easy?
+    ...Or should layers all be required to be of the same type?  I'm trying to
+    think of a not-completely-contrived example of where this would make sense.
+    Maybe something like a (Multi)Grid where free-moving agents can coalesce into
+    "cities" that then have NetworkGrid connections between them.  Okay, so then
+    the GridCoordinate of a city (e.g. (456, 789)) would have to be the node ID/
+    position/label for the NetworkGrid.  Not too clunky, not too bad.  Does speak
+    to the potential usefulness of being able to attach attributes to locations
+    in space:  so now we have Agents, Content, and (a/A)ttributes.
     '''
 
 
