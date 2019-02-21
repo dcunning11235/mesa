@@ -106,7 +106,9 @@ class Grid:
         self.grid = np.empty((self.width, self.height), dtype='object')
 
         # Add all cells to the empties list.
-        self.empties = dict.fromkeys(itertools.product(*(range(self.width), range(self.height))))
+        #self.empties = dict.fromkeys(itertools.product(*(range(self.width), range(self.height))))
+        self.empties = list(itertools.product(*(range(self.width), range(self.height))))
+        #self.empties = set(itertools.product(*(range(self.width), range(self.height))))
 
         self.last_radius = 0
         self.last_moore = True
@@ -224,7 +226,6 @@ class Grid:
 
         if inds.size > 0:
             inds = np.unique(inds, axis=0)
-        #return inds[:,0], inds[:,1]
         return inds
 
     def get_neighborhood(self, pos, moore,
@@ -373,7 +374,8 @@ class Grid:
         """ Place the agent at the correct location. """
         self.grid[pos[0], pos[1]] = agent
         if pos in self.empties:
-            del self.empties[pos]
+            #del self.empties[pos]
+            self.empties.remove(pos)
 
     def remove_agent(self, agent):
         """ Remove the agent from the grid and set its pos variable to None. """
@@ -384,7 +386,8 @@ class Grid:
     def _remove_agent(self, pos, agent):
         """ Remove the agent from the given location. """
         self.grid[pos[0], pos[1]] = None
-        self.empties[pos] = None
+        #self.empties[pos] = None
+        self.empties.append(pos)
 
     def is_cell_empty(self, pos):
         """ Returns a bool of the contents of a cell. """
@@ -417,16 +420,19 @@ class Grid:
         if pos is not None and max_radius is not None and max_radius > 0:
             empties = get_neighborhood(pos, moore,
                                  include_center=False, radius=max_radius)
-            empties = set(empties).intersect(self.empties.keys())
+            #empties = set(empties).intersect(self.empties.keys())
+            empties = set(empties).intersect(self.empties)
         else:
             empties = self.empties
 
         #Why not provide "default" random behavior as follows?
         if len(empties) > 0:
             if passed_random is None:
-                pos = random.choice(list(self.empties.keys()))
+                #pos = random.choice(list(self.empties.keys()))
+                pos = random.choice(self.empties)
             else:
-                pos = passed_random.choice(list(self.empties.keys()))
+                #pos = passed_random.choice(list(self.empties.keys()))
+                pos = passed_random.choice(self.empties)
 
             return pos
         else:
@@ -512,7 +518,8 @@ class MultiGrid(Grid):
             self.grid[pos[0], pos[1]] = self.default_val()
         self.grid[pos[0], pos[1]].add(agent)
         if pos in self.empties:
-            del self.empties[pos]
+            #del self.empties[pos]
+            self.empties.remove(pos)
 
     def _remove_agent(self, pos, agent):
         """ Remove the agent from the given location. """
