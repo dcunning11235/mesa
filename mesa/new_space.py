@@ -4,8 +4,13 @@ from typing import Any, Tuple, Set
 
 Position = Any
 Content = Any
+
 GridCoordinate = Tuple[int, int]
 CellContent = Set[Any]
+
+LayeredPosition = Tuple[string, Position]
+LayeredContent = Dict[str, Content]
+
 
 class _AbstractSpace(ABC):
     @abstractmethod
@@ -70,6 +75,71 @@ class _AbstractSpace(ABC):
     @abstractmethod
     def neighborhood_of(self, agent: Agent, include_own: bool = True) -> Iterator[Tuple[Position, Content]]:
         """Yield the neighborhood of an agent."""
+
+
+class LayeredSpace(_AbstractSpace):
+    def __init__(self):
+        super().__init__()
+        self.layers: Dict[str, _AbstractSpace] = {}
+
+    def __getitem__(self, pos: LayeredPosition) -> Content:
+        #Relies on __getitem__  on _AbstractSpace implementations not throwing
+        #   KeyError's but returning defaults, BUT ALSO doing their own bounds
+        #   checking and throwing errors appropriately.
+        return self.layers[pos[0]][pos[1]]
+
+    def __setitem__(self, pos: LayeredPosition, content: Content) -> None:
+        self.layers[pos[0]][pos[1]] = content
+
+    def __delitem__(self, content: Tuple[LayeredPosition, Content]) -> None:
+        self.layers[content[0][0]].__delitem__( (content[0][1], content[1]) )
+
+
+    def place_agent(self, agent: Agent, pos: LayeredPosition) -> None:
+        """Place an agent at a specific position."""
+
+        self[pos] = agent
+        #Tricky.  Since e.g. "Grid" doesn't know anything about layers, have to
+        #store the GridCoordinate in "pos", not the LayeredPosition.
+        #Should setattr "layer"?
+        setattr(agent, "layer", pos[0])
+        setattr(agent, "pos", pos[1])
+
+    def remove_agent(self, agent: Agent) -> None:
+        """Remove an agent from the space."""
+
+        old_pos = getattr(agent, "pos")
+        old_layer = getattr(agent, "layer")
+
+        del self[(old_layer, old_pos), agent]
+        setattr(agent, "layer", None)
+        setattr(agent, "pos", None)
+
+    def move_agent(self, agent: Agent, pos: LayeredPosition) -> None:
+        """Move an agent from its current to a new position."""
+
+        old_pos = getattr(agent, "pos")
+        older_layer = getattr(agent, "layer")
+
+        del self[(old_layer, old_pos), agent]
+        self[pos] = agent
+        setattr(agent, "layer", pos[0])
+        setattr(agent, "pos", pos[1])
+
+    '''
+    So now the question is, what "stacked" methods should be added and how should
+    returned values look?  E.g. def agents_at(self, pos: Position) returns
+    all the agents from all the layers as a single iterator?  A dict of
+    "layername":_AbstractSpace key:values?
+
+    It makes sense to group layers into (at least) Content and Agent layers... I
+    think...  Should layers have a type associated with them, too?  No, right? I
+    think that is a bad idea.  (You should have to specify the layer you want to
+    e.g. place an Agent into, not be able to rely on type-based placement...)
+
+    How would different spaces stack together?  How would a grid and network stack?
+    Are there any special considerations there, anything we want to make easy?
+    '''
 
 
 class Grid(_AbstractSpace):
