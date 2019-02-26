@@ -1,6 +1,7 @@
 from abc import ABC
 from mesa.agent import Agent
-from typing import Any, Tuple, Set
+from typing import Any, Tuple, Set, Union, Optional, Callable
+from number import Number, Real
 
 Position = Any
 Content = Any
@@ -25,20 +26,57 @@ Other things _AbstractSpace and subclasses might have:
 '''
 class _AbstractSpace(ABC):
     @abstractmethod
-    def __init__(self) -> None:
+    def __init__(self, consisitency_check: Callable[[_AbstractSpace, Position], bool] = None,
+                distance: Callable[[Positon, Positon], Real]) -> None:
         super().__init__()
+        self.consisitency_check = consisitency_check
+        self.distance = distance
+
+    @property
+    @abstractmethod
+    def is_continuous(self) -> bool:
+        """Return whether the space is continuous or discreet."""
+
+    '''
+    Getting way to complicated, leave this until much later...
+
+    @property
+    @abstractmethod
+    def is_cell_fixed(self) -> Optional[bool]:
+        """Return whether cells of a discreet space are fixed in size, None if
+        the space is continuous."""
+
+    @property
+    @abstractmethod
+    def cell_dimensions(self) -> Union[Number, Tuple[Number, ...], None]:
+        """Return the cell dimensions if the cell size is fixed and the space is
+        discreet."""
+    '''
+
+    @abstractmethod
+    def neighborhood_at(self, pos: Position, radius: Number = 1, include_own: bool = True) -> Union[Iterator[Position], _AbstractSpace]:
+        """Yield the neighborhood at a position, either an iterator over the
+        positions or an _AbstractSpace containing only the subspace of the
+        neighborhood."""
 
     @abstractmethod
     def __getitem__(self, pos: Position) -> Content:
-        """Return the content of self at a position.
+        """Return the content or value of self at a position.
         Called by `_AbstractSpace()[pos]`.
         """
 
     @abstractmethod
     def __setitem__(self, pos: Position, content: Content) -> None:
-        """Add content to self at position.
+        """Set the content or value at a position.
         Called by `_AbstractSpace()[pos] = content`.
         """
+
+
+class _AgentSpace(_AbstractSpace):
+    @abstractmethod
+    def __init__(self, consisitency_check: Callable[[_AbstractSpace, Position], bool] = None,
+                distance: Callable[[Positon, Positon], Real]) -> None:
+        super().__init__(consisitency_check, distance)
 
     @abstractmethod
     def __delitem__(self, content: Tuple[Position, Content]) -> None:
@@ -68,32 +106,47 @@ class _AbstractSpace(ABC):
         setattr(agent, "pos", pos)
 
     @abstractmethod
-    def content_at(self, pos: Position) -> Iterator[Content]:
-        """Yield the content of a position."""
-
-    @abstractmethod
     def agents_at(self, pos: Position) -> Iterator[Agent]:
         """Yield the agents at a specific position."""
 
     @abstractmethod
-    def neighbors_of(self, agent: Agent) -> Iterator[Agent]:
-        """Yield the neighbors of an Agent."""
+    def neighbors_at(self, pos: Position, radius: Number = 1) -> Iterator[Agent]:
+        """Yield the agents in proximity to a position."""
 
     @abstractmethod
-    def neighborhood_at(self, pos: Position, include_own: bool = True) -> Iterator[Position]:
-        """Yield the neighborhood at a Position."""
+    def neighbors_of(self, agent: Agent, radius: Number = 1) -> Iterator[Agent]:
+        """Yield the neighbors of an agent."""
 
     @abstractmethod
-    def neighborhood_of(self, agent: Agent, include_own: bool = True) -> Iterator[Tuple[Position, Content]]:
+    def neighborhood_of(self, agent: Agent, radius: Number = 1, include_own: bool = True) -> Union[Iterator[Position], AgentSpace]:
         """Yield the neighborhood of an agent."""
 
 
-class _PatchSpace(ABC):
+class _PatchSpace(_AbstractSpace):
     @abstractmethod
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, consisitency_check: Callable[[_AbstractSpace, Position], bool] = None,
+                distance: Callable[[Positon, Positon], Real],
+                patch_name: str, patch_type: type) -> None:
+        super().__init__(consisitency_check, distance)
+        self.patch_name = patch_name
+        self.patch_type = patch_type
 
-    
+    @abstractmethod
+    def __add__(self, other: Any) -> _PatchSpace:
+        """Add values of one _PatchSpace to another _PatchSpace"""
+
+    @abstractmethod
+    def __iadd__(self, other: Any) -> None:
+        """Add values of one _PatchSpace to another _PatchSpace"""
+
+    @abstractmethod
+    def __sub__(self, other: Any) -> _PatchSpace:
+        """Subtract values of one _PatchSpace from another _PatchSpace"""
+
+    @abstractmethod
+    def __isub__(self, other: Any) -> None:
+        """Subtract values of one _PatchSpace from another _PatchSpace"""
+
 
 
 class LayeredSpace(_AbstractSpace):
