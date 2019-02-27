@@ -1,7 +1,11 @@
 from abc import ABC
 from mesa.agent import Agent
-from typing import Any, Tuple, Set, Union, Optional, Callable
+from typing import Any, Tuple, Set, Union, Optional, Callable, NamedTuple
 from number import Number, Real
+from collections import namedtuple
+from itertools import chain
+from math import pow, sqrt
+from inspect import stack
 
 Position = Any
 Content = Any
@@ -9,25 +13,10 @@ Content = Any
 GridCoordinate = Tuple[int, int]
 CellContent = Set[Any]
 
-LayeredPosition = Tuple[string, Position]
-LayeredContent = Dict[str, Content]
-
-'''
-Other things _AbstractSpace and subclasses might have:
-    Grid:  Max occupancy (1, inf, 7, etc.)
-    LayeredSpace:  Max occupancy (1, inf, 7, etc.) by some type (e.g. 2 Agents
-                    are allowed across all layers, but maybe inf content.)
-    NOTE: Maybe the above two point to a need for some general "consistency checks"
-        functionality, e.g. a function that the user can pass in to a space that
-        is called whenever a cell/node/etc. has its contents (Agents, Contents,
-        etc.) updated.  The function would have a signature like:
-        consisitency_check(space, position) -> bool where a False vetos the change
-        and a True allows it.
-'''
 class _AbstractSpace(ABC):
     @abstractmethod
-    def __init__(self, consisitency_check: Callable[[_AbstractSpace, Position], bool] = None,
-                distance: Callable[[Positon, Positon], Real]) -> None:
+    def __init__(self, consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None,
+                distance: Callable[[Positon, Positon], Real] = None) -> None:
         super().__init__()
         self.consisitency_check = consisitency_check
         self.distance = distance
@@ -38,7 +27,7 @@ class _AbstractSpace(ABC):
         """Return whether the space is continuous or discreet."""
 
     '''
-    Getting way to complicated, leave this until much later...
+    Getting way to complicated here, leave this until much later...
 
     @property
     @abstractmethod
@@ -62,27 +51,28 @@ class _AbstractSpace(ABC):
     @abstractmethod
     def __getitem__(self, pos: Position) -> Content:
         """Return the content or value of self at a position.
-        Called by `_AbstractSpace()[pos]`.
-        """
+        Called by `_AbstractSpace()[pos]`."""
 
     @abstractmethod
     def __setitem__(self, pos: Position, content: Content) -> None:
         """Set the content or value at a position.
-        Called by `_AbstractSpace()[pos] = content`.
-        """
+        Called by `_AbstractSpace()[pos] = content`."""
 
 
 class _AgentSpace(_AbstractSpace):
     @abstractmethod
-    def __init__(self, consisitency_check: Callable[[_AbstractSpace, Position], bool] = None,
-                distance: Callable[[Positon, Positon], Real]) -> None:
+    def __init__(self, consistency_check: Callable[[_AgentSpace, Position, Agent], bool] = None,
+                distance: Callable[[Positon, Positon], Real] = None) -> None:
         super().__init__(consisitency_check, distance)
 
     @abstractmethod
-    def __delitem__(self, content: Tuple[Position, Content]) -> None:
+    def __delitem__(self, content: Tuple[Position, Agent]) -> None:
         """Delete content from the position in self.
-        Called by `del _AbstractSpace()[pos, content]`.
-        """
+        Called by `del _AbstractSpace()[pos, content]`."""
+
+    @abstractmethod
+    def __contains__(self, content: Tuple[Position, Agent]) -> bool:
+        """Determine if Agent is contained at Position in this space."""
 
     def place_agent(self, agent: Agent, pos: Position) -> None:
         """Place an agent at a specific position."""
@@ -94,16 +84,16 @@ class _AgentSpace(_AbstractSpace):
         """Remove an agent from the space."""
 
         old_pos = getattr(agent, "pos")
+        if (old_pos, agent) not in self:
+            raise KeyError("Agent not removed because {} was not found at position {}.".format(agent, old_pos))
         del self[old_pos, agent]
         setattr(agent, "pos", None)
 
     def move_agent(self, agent: Agent, pos: Position) -> None:
         """Move an agent from its current to a new position."""
 
-        old_pos = getattr(agent, "pos")
-        del self[old_pos, agent]
-        self[pos] = agent
-        setattr(agent, "pos", pos)
+        self.remove_agent(agent)
+        self.place_agent(agent, pos)
 
     @abstractmethod
     def agents_at(self, pos: Position) -> Iterator[Agent]:
@@ -124,12 +114,20 @@ class _AgentSpace(_AbstractSpace):
 
 class _PatchSpace(_AbstractSpace):
     @abstractmethod
-    def __init__(self, consisitency_check: Callable[[_AbstractSpace, Position], bool] = None,
-                distance: Callable[[Positon, Positon], Real],
-                patch_name: str, patch_type: type) -> None:
+    def __init__(self, consistency_check: Callable[[_PatchSpace, Position, Content], bool] = None,
+                distance: Callable[[Positon, Positon], Real] = None,
+                patch_name: str = None, patch_type: type = None) -> None:
         super().__init__(consisitency_check, distance)
         self.patch_name = patch_name
         self.patch_type = patch_type
+        self.steps = 0
+
+    @abstractmethod
+    def __setitem__(self, pos: Position, content: Content) -> None:
+        """Set the content or value at a position.
+        Called by `_AbstractSpace()[pos] = content`."""
+        if self.patch_type is not None and isinstance(content, self.patch_type):
+            raise AttributeError("Cannot assign type of {} to Patch of type {}.".format(type(content), self.patch_type))
 
     @abstractmethod
     def __add__(self, other: Any) -> _PatchSpace:
@@ -147,84 +145,135 @@ class _PatchSpace(_AbstractSpace):
     def __isub__(self, other: Any) -> None:
         """Subtract values of one _PatchSpace from another _PatchSpace"""
 
+    @abstractmethod
+    def step(self) -> None:
+        """_PatchSpace is like model in that it has a step method, and like a
+        BaseScheduler in that it has a self.steps that is incremented with each
+        call of step.
+        """
+        self.steps += 1
 
 
-class LayeredSpace(_AbstractSpace):
+class LayeredPosition(NamedTuple):
+    layer: str
+    pos: Position
+
+# Relies on __getitem__  on _AbstractSpace implementations not throwing
+# KeyError's but returning defaults, BUT ALSO doing their own bounds
+# checking and throwing errors appropriately.
+class LayeredSpace(_AgentSpace, _PatchSpace):
     def __init__(self):
         super().__init__()
         self.layers: Dict[str, _AbstractSpace] = {}
 
+    # From _AbstractSpace
     def __getitem__(self, pos: LayeredPosition) -> Content:
-        #Relies on __getitem__  on _AbstractSpace implementations not throwing
-        #   KeyError's but returning defaults, BUT ALSO doing their own bounds
-        #   checking and throwing errors appropriately.
-        return self.layers[pos[0]][pos[1]]
+        return self.layers[pos.layer][pos.pos]
 
+    # From _AbstractSpace
     def __setitem__(self, pos: LayeredPosition, content: Content) -> None:
-        self.layers[pos[0]][pos[1]] = content
+        self.layers[pos.layer][pos.pos] = content
 
+    # From _AgentSpace
     def __delitem__(self, content: Tuple[LayeredPosition, Content]) -> None:
-        self.layers[content[0][0]].__delitem__( (content[0][1], content[1]) )
+        self.layers[content[0].layer].__delitem__( (content[0].pos, content[1]) )
 
+    # From _AgentSpace
+    @abstractmethod
+    def __contains__(self, content: Tuple[LayeredPosition, Agent]) -> bool:
+        return (content[0].pos, content[1]) in self.layers[content[0].layer]
 
+    # From _AgentSpace
     def place_agent(self, agent: Agent, pos: LayeredPosition) -> None:
         """Place an agent at a specific position."""
-
-        self[pos] = agent
-        #Tricky.  Since e.g. "Grid" doesn't know anything about layers, have to
-        #store the GridCoordinate in "pos", not the LayeredPosition.
-        #Should setattr "layer"?
+        self.layers[pos.layer.place_agent(agent, pos.pos)
         setattr(agent, "layer", pos[0])
-        setattr(agent, "pos", pos[1])
 
+    # From _AgentSpace
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
-
-        old_pos = getattr(agent, "pos")
-        old_layer = getattr(agent, "layer")
-
-        del self[(old_layer, old_pos), agent]
+        self.layers[getattr(agent, "layer")].remove_agent(agent, getattr(agent, "pos"))
         setattr(agent, "layer", None)
-        setattr(agent, "pos", None)
 
-    def move_agent(self, agent: Agent, pos: LayeredPosition) -> None:
-        """Move an agent from its current to a new position."""
+    def agents_at(self, pos: Union[Position, LayeredPosition]) -> Iterator[Agent]:
+        """Yield the agents at a specific position within a specific layer if
+        the passed `pos` is of type `LayeredPosition`, else yield the agents at
+        the passed `Position` for all layers"""
+        if instanceof(pos, LayeredPosition):
+            return self.layers[pos.layer].agents_at(pos.pos)
+        else:
+            return chain(*[l.agents_at(pos) for l in self.layers.values if instanceof(l, _AgentSpace)])
 
-        old_pos = getattr(agent, "pos")
-        older_layer = getattr(agent, "layer")
+    def neighbors_at(self, pos: Union[Position, LayeredPosition], radius: Number = 1) -> Iterator[Agent]:
+        """Yield the agents in proximity to a position."""
+        if instanceof(pos, LayeredPosition):
+            return self.layers[pos.layer].neighbors_at(pos.pos, radius)
+        else:
+            return chain(*[l.neighbors_at(pos, radius) for l in self.layers.values if instanceof(l, _AgentSpace)])
 
-        del self[(old_layer, old_pos), agent]
-        self[pos] = agent
-        setattr(agent, "layer", pos[0])
-        setattr(agent, "pos", pos[1])
+    def neighbors_of(self, agent: Agent, radius: Number = 1) -> Iterator[Agent]:
+        """Yield the neighbors of an agent."""
+        return self.layers[getattr(agent, "layer")].neighbors_of(agent, radius)
 
-    '''
-    So now the question is, what "stacked" methods should be added and how should
-    returned values look?  E.g. def agents_at(self, pos: Position) returns
-    all the agents from all the layers as a single iterator?  A dict of
-    "layername":_AbstractSpace key:values?
+    @abstractmethod
+    def neighborhood_of(self, agent: Agent, radius: Number = 1, include_own: bool = True) -> Union[Iterator[LayeredPosition], AgentSpace]:
+        """Yield the neighborhood of an agent."""
+        return self.layers[getattr(agent, "layer")].neighborhood_of(agent, radius, include_own)
 
-    It makes sense to group layers into (at least) Content and Agent layers... I
-    think...  Should layers have a type associated with them, too?  No, right? I
-    think that is a bad idea.  (You should have to specify the layer you want to
-    e.g. place an Agent into, not be able to rely on type-based placement...)
 
-    How would different spaces stack together?  How would a grid and network stack?
-    Are there any special considerations there, anything we want to make easy?
-    ...Or should layers all be required to be of the same type?  I'm trying to
-    think of a not-completely-contrived example of where this would make sense.
-    Maybe something like a (Multi)Grid where free-moving agents can coalesce into
-    "cities" that then have NetworkGrid connections between them.  Okay, so then
-    the GridCoordinate of a city (e.g. (456, 789)) would have to be the node ID/
-    position/label for the NetworkGrid.  Not too clunky, not too bad.  Does speak
-    to the potential usefulness of being able to attach attributes to locations
-    in space:  so now we have Agents, Content, and (a/A)ttributes.
-    '''
+class GridDistances:
+    @staticmethod
+    def euclidian(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
+        return sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2)
+
+    @staticmethod
+    def manhattan(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
+        return abs(coord1[0]-coord2[0]) + abs((coord1[1]-coord2[1]))
+
+    @staticmethod
+    def chebyshev(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
+        return max(abs(coord1[0]-coord2[0]), abs((coord1[1]-coord2[1])))
+
+
+class GridConsistencyChecks:
+    warn_flag = False
+
+    @staticmethod
+    def _get_caller() -> str:
+        func_name = ""
+        try:
+            func_name = sys._getframe(2).f_code.co_name
+        except:
+            if not warn_flag:
+                warn_flag = True
+                raise ResourceWarning("sys._getframe(2).f_code.co_name is unavailable, using much slower inspect.stack()!")
+            func_name = inspect.stack()[2].function
+
+        if func_name == "":
+            raise ValueException("Unable to get source method name for GridConsistencyChecks")
+
+        return func_name
+
+    @staticmethod
+    def max1(grid: Grid, coord: GridCoordinate, agent: Agent) -> bool:
+        caller = _get_caller()
+
+        if caller == "__setitem__":
+            return not len(grid[coord])
+
+    @staticmethod
+    def unique(grid: Grid, coord: GridCoordinate, agent: Agent) -> bool:
+        caller = _get_caller()
+
+        if caller == "__setitem__":
+            return type(agent) not in map(type, grid[coord])
 
 
 class Grid(_AbstractSpace):
-    def __init__(self, width: int, height: int):
-        super().__init__()
+    def __init__(self, width: int, height: int,
+                consistency_check: Callable[[Grid, GridCoordinate, Agent, str], bool] = ConsistencyChecks.max1,
+                distance: Callable[[GridCoordinate, GridCoordinate], Real] = GridDistances.chebyshev):
+        super().__init__(consisitency_check, distance)
 
         self.width = width
         self.height = height
@@ -235,13 +284,20 @@ class Grid(_AbstractSpace):
         """Return the default value for empty cells."""
         return set()
 
-    def __getitem__(self, pos: GridCoordinate) -> CellContent:
+    @property
+    def is_continuous(self) -> bool:
+        return False
+
+    def __getitem__(self, pos: GridCoordinate) -> set:
         try:
             return self._grid[pos]
         except KeyError:
             return self.default_value
 
     def __setitem__(self, pos: GridCoordinate, agent: Agent) -> None:
+        if self.consistency_check is not None:
+            self.consistency_check(self, pos, agent)
+
         try:
             self._grid[pos].add(agent)
         except KeyError:
@@ -249,3 +305,24 @@ class Grid(_AbstractSpace):
 
     def __delitem__(self, item: Tuple[GridCoordinate, Agent]) -> None:
         self._grid[item[0]].remove(item[1])
+
+    def __contains__(self, item: Tuple[GridCoordinate, Agent]) -> bool:
+        return item[1] in self._grid[item[0]]
+
+    def neighborhood_at(self, pos: GridCoordinate, radius: Number = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
+        """Yield the neighborhood at a position, either an iterator over the
+        positions or an _AbstractSpace containing only the subspace of the
+        neighborhood."""
+        for
+
+    def agents_at(self, pos: GridCoordinate) -> Iterator[Agent]:
+        return iter(self._grid[pos])
+
+    def neighbors_at(self, pos: GridCoordinate, radius: Number = 1) -> Iterator[Agent]:
+        neighborhood_at
+
+    def neighbors_of(self, agent: Agent, radius: Number = 1) -> Iterator[Agent]:
+        """Yield the neighbors of an agent."""
+
+    def neighborhood_of(self, agent: Agent, radius: Number = 1, include_own: bool = True) -> Union[Iterator[GridCoordinate], AgentSpace]:
+        """Yield the neighborhood of an agent."""
