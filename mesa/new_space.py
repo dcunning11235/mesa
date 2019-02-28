@@ -13,13 +13,27 @@ Content = Any
 GridCoordinate = Tuple[int, int]
 CellContent = Set[Any]
 
+class _Metric(ABC):
+    @staticmethod
+    @abstractmethod
+    def distance(pos1: Position, pos2: Position) -> Real:
+        """Returns the distance (real) bewteen two positions"""
+
+    @staticmethod
+    @abstractmethod
+    def neighborhood(center: Position, radius: Real) -> Union[Iterator[Position], _AbstractSpace]:
+        """Returns the neighborhood of a point with the given radius.  Returns an
+        iterator of Position's if a discreet space, or a (sub)_AbstractSpace if
+        continuous."""
+
+
 class _AbstractSpace(ABC):
     @abstractmethod
     def __init__(self, consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None,
-                distance: Callable[[Positon, Positon], Real] = None) -> None:
+                metric: _Metric) -> None:
         super().__init__()
         self.consisitency_check = consisitency_check
-        self.distance = distance
+        self.metric = metric
 
     @property
     @abstractmethod
@@ -62,8 +76,8 @@ class _AbstractSpace(ABC):
 class _AgentSpace(_AbstractSpace):
     @abstractmethod
     def __init__(self, consistency_check: Callable[[_AgentSpace, Position, Agent], bool] = None,
-                distance: Callable[[Positon, Positon], Real] = None) -> None:
-        super().__init__(consisitency_check, distance)
+                metric: _Metric) -> None:
+        super().__init__(consisitency_check, metric)
 
     @abstractmethod
     def __delitem__(self, content: Tuple[Position, Agent]) -> None:
@@ -115,9 +129,9 @@ class _AgentSpace(_AbstractSpace):
 class _PatchSpace(_AbstractSpace):
     @abstractmethod
     def __init__(self, consistency_check: Callable[[_PatchSpace, Position, Content], bool] = None,
-                distance: Callable[[Positon, Positon], Real] = None,
+                metric: _Metric,
                 patch_name: str = None, patch_type: type = None) -> None:
-        super().__init__(consisitency_check, distance)
+        super().__init__(consisitency_check, distance, neighborhood)
         self.patch_name = patch_name
         self.patch_type = patch_type
         self.steps = 0
@@ -221,18 +235,42 @@ class LayeredSpace(_AgentSpace, _PatchSpace):
         return self.layers[getattr(agent, "layer")].neighborhood_of(agent, radius, include_own)
 
 
-class GridDistances:
+class EuclidianGridMetric(_Metric):
     @staticmethod
-    def euclidian(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
+    def distance(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
         return sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2)
 
+    @staticmethod
+    def neighborhood(center: Position, radius: int) -> Iterator[GridCoordinate]:
+        # This is ugly and inefficient, but this will grind out the needed result
+        for y in range(-radius, radius+1):
+            for x in range(-radius, radius+1):
+                if sqrt(y**2 + x**2) <= radius:
+                    yield (center[0]+x, center[1]+y)
+
+
+class ManhattanGridMetric(_Metric):
     @staticmethod
     def manhattan(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
         return abs(coord1[0]-coord2[0]) + abs((coord1[1]-coord2[1]))
 
     @staticmethod
+    def neighborhood(center: GridCoordinate, radius: Real) -> Iterator[Position]:
+        for y in range(-radius, radius+1):
+            for x in range(abs(y)-radius, radius-abs(y)+1)
+                yield (center[0]+x, center[1]+y)
+
+
+class ChebyshevGridMetric(_Metric):
+    @staticmethod
     def chebyshev(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
         return max(abs(coord1[0]-coord2[0]), abs((coord1[1]-coord2[1])))
+
+    @staticmethod
+    def neighborhood(center: Position, radius: Real) -> Iterator[Position]:
+        for y in range(-radius, radius+1):
+            for x in range(-radius, radius+1):
+                yield (center[0]+x, center[1]+y)
 
 
 class GridConsistencyChecks:
@@ -272,7 +310,7 @@ class GridConsistencyChecks:
 class Grid(_AbstractSpace):
     def __init__(self, width: int, height: int,
                 consistency_check: Callable[[Grid, GridCoordinate, Agent, str], bool] = ConsistencyChecks.max1,
-                distance: Callable[[GridCoordinate, GridCoordinate], Real] = GridDistances.chebyshev):
+                metric: _Metric = ManhattanGridMetric):
         super().__init__(consisitency_check, distance)
 
         self.width = width
