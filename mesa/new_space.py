@@ -75,7 +75,8 @@ class _AbstractSpace(ABC):
 
 class _AgentSpace(_AbstractSpace):
     @abstractmethod
-    def __init__(self, consistency_check: Callable[[_AgentSpace, Position, Agent], bool] = None,
+    def __init__(self,
+                consistency_check: Callable[[_AgentSpace, Position, Agent], bool] = None,
                 metric: _Metric) -> None:
         super().__init__(consisitency_check, metric)
 
@@ -229,7 +230,6 @@ class LayeredSpace(_AgentSpace, _PatchSpace):
         """Yield the neighbors of an agent."""
         return self.layers[getattr(agent, "layer")].neighbors_of(agent, radius)
 
-    @abstractmethod
     def neighborhood_of(self, agent: Agent, radius: Number = 1, include_own: bool = True) -> Union[Iterator[LayeredPosition], AgentSpace]:
         """Yield the neighborhood of an agent."""
         return self.layers[getattr(agent, "layer")].neighborhood_of(agent, radius, include_own)
@@ -241,7 +241,7 @@ class EuclidianGridMetric(_Metric):
         return sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2)
 
     @staticmethod
-    def neighborhood(center: Position, radius: int) -> Iterator[GridCoordinate]:
+    def neighborhood(center: GridCoordinate, radius: int) -> Iterator[GridCoordinate]:
         # This is ugly and inefficient, but this will grind out the needed result
         for y in range(-radius, radius+1):
             for x in range(-radius, radius+1):
@@ -255,9 +255,9 @@ class ManhattanGridMetric(_Metric):
         return abs(coord1[0]-coord2[0]) + abs((coord1[1]-coord2[1]))
 
     @staticmethod
-    def neighborhood(center: GridCoordinate, radius: Real) -> Iterator[Position]:
+    def neighborhood(center: GridCoordinate, radius: int) -> Iterator[Position]:
         for y in range(-radius, radius+1):
-            for x in range(abs(y)-radius, radius-abs(y)+1)
+            for x in range(abs(y)-radius, radius-abs(y)+1):
                 yield (center[0]+x, center[1]+y)
 
 
@@ -267,7 +267,7 @@ class ChebyshevGridMetric(_Metric):
         return max(abs(coord1[0]-coord2[0]), abs((coord1[1]-coord2[1])))
 
     @staticmethod
-    def neighborhood(center: Position, radius: Real) -> Iterator[Position]:
+    def neighborhood(center: GridCoordinate, radius: int) -> Iterator[Position]:
         for y in range(-radius, radius+1):
             for x in range(-radius, radius+1):
                 yield (center[0]+x, center[1]+y)
@@ -307,11 +307,11 @@ class GridConsistencyChecks:
             return type(agent) not in map(type, grid[coord])
 
 
-class Grid(_AbstractSpace):
+class Grid(_AgentSpace):
     def __init__(self, width: int, height: int,
                 consistency_check: Callable[[Grid, GridCoordinate, Agent, str], bool] = ConsistencyChecks.max1,
-                metric: _Metric = ManhattanGridMetric):
-        super().__init__(consisitency_check, distance)
+                metric: _Metric = ChebyshevGridMetric:
+        super().__init__(consisitency_check, metric)
 
         self.width = width
         self.height = height
@@ -347,11 +347,14 @@ class Grid(_AbstractSpace):
     def __contains__(self, item: Tuple[GridCoordinate, Agent]) -> bool:
         return item[1] in self._grid[item[0]]
 
-    def neighborhood_at(self, pos: GridCoordinate, radius: Number = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
+    def neighborhood_at(self, pos: GridCoordinate, radius: int = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
         """Yield the neighborhood at a position, either an iterator over the
         positions or an _AbstractSpace containing only the subspace of the
         neighborhood."""
-        for
+        if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
+            for n in self.metric.neighborhood(pos, radius):
+                if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
+                    yield n
 
     def agents_at(self, pos: GridCoordinate) -> Iterator[Agent]:
         return iter(self._grid[pos])
