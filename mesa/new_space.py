@@ -13,11 +13,27 @@ Content = Any
 GridCoordinate = Tuple[int, int]
 CellContent = Set[Any]
 
+
 class _Metric(ABC):
+    """Class that implements path length, distance (two-point path), and
+    neighborhood for _AbstractSpace.  The idea here is roughly similar to
+    distance and a 'ball' in e.g. topology.  However, for irregular/path-dependent
+    spaces, `distance` cannot be gauranteed to return the true distance (aka, the
+    shortest path) between two points (much less amongst more than 2), and hence
+    `neighborhood` also cannot be gauranteed to return the true ball.
+
+    For simple measures, e.g. a 2-D grid or continuous space with a Chebyshev or
+    Euclidian metric, this should of course of exact.
+    """
     @staticmethod
     @abstractmethod
     def distance(pos1: Position, pos2: Position) -> Real:
         """Returns the distance (real) bewteen two positions"""
+
+    @staticmethod
+    @abstractmethod
+    def path_length(Iterator[Position]) -> Real:
+        """Returns the distance (real) along a given path/iterator of positions"""
 
     @staticmethod
     @abstractmethod
@@ -38,17 +54,30 @@ class _AbstractSpace(ABC):
     @property
     @abstractmethod
     def is_continuous(self) -> bool:
-        """Return whether the space is continuous or discreet."""
+        """Return whether the space is continuous or discreet.  Discreet spaces
+        are assumed to be finite, in addition."""
 
     @abstractmethod
-    def __contains__(self, pos_or_content: Union[Position, Content]) -> bool:
-        """Returns wether a point or content is in the space."""
+    def __contains__(self, pos: Position) -> bool:
+        """Returns wether a pos is in the space."""
+
+    @abstractmethod
+    def get_all_positions(self) -> Iterator[Position]:
+        """Returns an Iterator that gives all positions (for non-continuous
+        spaces) or throws a TypeError."""
+        if self.is_continuous:
+            raise TypeError("Cannot iterate all positions for a continuous space!")
 
     @abstractmethod
     def neighborhood_at(self, pos: Position, radius: Number = 1, include_own: bool = True) -> Union[Iterator[Position], _AbstractSpace]:
         """Yield the neighborhood at a position, either an iterator over the
         positions or an _AbstractSpace containing only the subspace of the
         neighborhood."""
+
+    @abstractmethod
+    def neighbors_at(self, pos: Position, radius: Number = 1, include_own: bool = True) -> Iterator[Content]:
+        """Yield the neighbors in proximity to a position, possible including those
+        at the passed position."""
 
     @abstractmethod
     def __getitem__(self, pos: Position) -> Content:
@@ -60,6 +89,18 @@ class _AbstractSpace(ABC):
         """Set the content or value at a position.
         Called by `_AbstractSpace()[pos] = content`."""
 
+    @abstractmethod
+    def __delitem__(self, pos: Position) -> None:
+        """Delete content or value at a position.  This should *not* remove the
+        position itself (e.g. unlike `del dict[key]`).  E.g. a Grid implementation
+        should should still return some 'empty' value for coordinates that are
+        in-bounds.  See `__missing__`."""
+
+    @abstractmethod
+    def __missing__(self, pos: Position) -> Content:
+        """Handle missing positions.  Used for e.g. lazy filling.  Should raise
+        an appropriate exception for e.g. out-of-bounds positions."""
+
 
 class _AgentSpace(_AbstractSpace):
     @abstractmethod
@@ -69,80 +110,135 @@ class _AgentSpace(_AbstractSpace):
         super().__init__(consisitency_check, metric)
 
     @abstractmethod
-    def __delitem__(self, content: Tuple[Position, Agent]) -> None:
-        """Delete content from the position in self.
-        Called by `del _AbstractSpace()[pos, content]`."""
-
     def place_agent(self, agent: Agent, pos: Position) -> None:
         """Place an agent at a specific position."""
 
-        self[pos] = agent
-        setattr(agent, "pos", pos)
-
+    @abstractmethod
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
 
-        old_pos = getattr(agent, "pos")
-        if (old_pos, agent) not in self:
-            raise KeyError("Agent not removed because {} was not found at position {}.".format(agent, old_pos))
-        del self[old_pos, agent]
-        setattr(agent, "pos", None)
-
     def move_agent(self, agent: Agent, pos: Position) -> None:
         """Move an agent from its current to a new position."""
-
         self.remove_agent(agent)
         self.place_agent(agent, pos)
 
     @abstractmethod
+    def agent_exists(self, agent: Agent) -> bool:
+        """Return if an agent exists within the space."""
+
+    @abstractmethod
+    def find_agent(self, agent: Agent) -> Position:
+        """Return where an agent is (its Position) within the space."""
+
+    @property
+    @abstractmethod
+    def agents(self) -> Iterator[Agent]:
+        """Returns all agents within the space."""
+
+    @abstractmethod
+    def neighbors_at(self, pos: Position, radius: Number = 1, include_own: bool = True) -> Iterator[Agent]:
+        """Yield the agents in proximity to a position, possible including those
+        at the passed position."""
+
     def agents_at(self, pos: Position) -> Iterator[Agent]:
-        """Yield the agents at a specific position."""
+        """Yield the neighbors at a given position (i.e. neighnors_at, but with
+        radius=0)."""
+        return neighbors_at(self, pos, 0, False)
 
-    @abstractmethod
-    def neighbors_at(self, pos: Position, radius: Number = 1) -> Iterator[Agent]:
-        """Yield the agents in proximity to a position."""
+    def neighbors_of(self, agent: Agent, radius: Number = 1, include_own: bool = True) -> Iterator[Agent]:
+        """Yield the agents that are the neighbors of a given agent, including
+        itself possibly."""
+        return self.neighbors_at(self.find_agent(agent), radius, include_own)
 
-    @abstractmethod
-    def neighbors_of(self, agent: Agent, radius: Number = 1) -> Iterator[Agent]:
-        """Yield the neighbors of an agent."""
-
-    @abstractmethod
     def neighborhood_of(self, agent: Agent, radius: Number = 1, include_own: bool = True) -> Union[Iterator[Position], AgentSpace]:
-        """Yield the neighborhood of an agent."""
+        """Yield the positions of the neighborhood of an agent."""
+        return self.neighborhood_at(self.find_agent(agent), radius, include_own)
 
 
 class _PatchSpace(_AbstractSpace):
+    """_PatchSpace holds simple values, or wraps objects that present a simple
+    value, which can be +,-,*,/, or ** together or with a scalar.  A `step`
+    method is also included so that the _PatchSpace iself can be e.g. added to a
+    scheduler.
+    """
     @abstractmethod
-    def __init__(self, consistency_check: Callable[[_PatchSpace, Position, Content], bool] = None,
+    def __init__(self,
+                consistency_check: Callable[[_PatchSpace, Position, Content], bool] = None,
                 metric: _Metric,
-                patch_name: str = None, patch_type: type = None) -> None:
+                patch_name: str = None) -> None:
         super().__init__(consisitency_check, distance, neighborhood)
+        """Include path_name because for e.g. pure numeric patches there isn't
+        any other identifying information."""
         self.patch_name = patch_name
-        self.patch_type = patch_type
         self.steps = 0
 
     @abstractmethod
-    def __setitem__(self, pos: Position, content: Content) -> None:
-        """Set the content or value at a position.
-        Called by `_AbstractSpace()[pos] = content`."""
-        if self.patch_type is not None and isinstance(content, self.patch_type):
-            raise AttributeError("Cannot assign type of {} to Patch of type {}.".format(type(content), self.patch_type))
-
-    @abstractmethod
     def __add__(self, other: Any) -> _PatchSpace:
-        """Add values of one _PatchSpace to another _PatchSpace"""
+        """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     @abstractmethod
     def __iadd__(self, other: Any) -> None:
-        """Add values of one _PatchSpace to another _PatchSpace"""
+        """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+
+    @abstractmethod
+    def __radd__(self, other: Any) -> None:
+        """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     @abstractmethod
     def __sub__(self, other: Any) -> _PatchSpace:
-        """Subtract values of one _PatchSpace from another _PatchSpace"""
+        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
 
     @abstractmethod
     def __isub__(self, other: Any) -> None:
-        """Subtract values of one _PatchSpace from another _PatchSpace"""
+        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+
+    @abstractmethod
+    def __rsub__(self, other: Any) -> None:
+        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+
+    @abstractmethod
+    def __mul__(self, other: Any) -> None:
+        """Element-by-element multiply values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __imul__(self, other: Any) -> None:
+        """Element-by-element multiplication of values of one _PatchSpace by
+        another _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __rmul__(self, other: Any) -> None:
+        """Element-by-element multiplication of values of one _PatchSpace by
+        another _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __div__(self, other: Any) -> None:
+        """Element-by-element division of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __idiv__(self, other: Any) -> None:
+        """Element-by-element division of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __pow__(self, other: Any) -> None:
+        """Element-by-element power of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __ipow__(self, other: Any) -> None:
+        """Element-by-element power of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def neighbors_at(self, pos: Position, radius: Number = 1, include_own: bool = True) -> Iterator[(Position, Content)]:
+        """Yield the agents in proximity to a position, possible including those
+        at the passed position."""
+
+    @abstractmethod
+    def value_at(self, pos: Position) -> Content:
+        """Yield the value at a given position."""
 
     @abstractmethod
     def step(self) -> None:
@@ -157,44 +253,97 @@ class LayeredPosition(NamedTuple):
     layer: str
     pos: Position
 
+
 # Relies on __getitem__  on _AbstractSpace implementations not throwing
 # KeyError's but returning defaults, BUT ALSO doing their own bounds
 # checking and throwing errors appropriately.
-class LayeredSpace(_AgentSpace, _PatchSpace):
-    def __init__(self):
+class LayeredSpace(_AgentSpace):
+    """
+    LayeredSpace is a composite of _AbstractSpace's, each named.  Adding an
+    _AgentSpace to a LayeredSpace causes its __setitem__, __delitem__,
+    place_agent, and remove_agent methods to be wrapped.
+    """
+    def __init__(self, layers: Dict[str, _AbstractSpace] = {}):
         super().__init__()
-        self.layers: Dict[str, _AbstractSpace] = {}
-
-    def get_layer(self, layer: str) -> _AbstractSpace:
-        return self.layers[layer]
+        self.layers: Dict[str, _AbstractSpace] = layers
+        self._agent_to_layer: Dict[Agent, str] = {}
 
     # From _AbstractSpace
     def __getitem__(self, pos: LayeredPosition) -> Content:
         return self.layers[pos.layer][pos.pos]
 
+    def get_layer(self, layer: str) -> _AbstractSpace:
+        return self.layers[layer]
+
     # From _AbstractSpace
     def __setitem__(self, pos: LayeredPosition, content: Content) -> None:
         self.layers[pos.layer][pos.pos] = content
 
+        del self._agent_to_layer[content]
+        if isinstance(content, Agent):
+            self._agent_to_layer[content] = pos.layer
+
     def set_layer(self, layer_name:str, layer: _AbstractSpace) -> None:
+        old_layer = self.layers[layer_name] if layer_name in self.layers else None
         self.layers[layer_name] = layer
 
+        if old_layer is not None and isinstance(old_layer, _AgentSpace):
+            for agent in old_layer.agents:
+                del self._agent_to_layer[agent]
+        if isinstance(layer, _AgentSpace):
+            for agent in layer.agents:
+                self._agent_to_layer[agent] = layer_name
+
+
     # From _AgentSpace
-    def __delitem__(self, content: Tuple[LayeredPosition, Content]) -> None:
-        self.layers[content[0].layer].__delitem__( (content[0].pos, content[1]) )
+    def __delitem__(self, content: LayeredPosition) -> None:
+        del self.layers[content.layer][content.pos]
 
     def del_layer(self, layer_name: str) -> None:
         del self.layers[layer_name]
 
     # From _AgentSpace
-    def __contains__(self, pos_or_content: Union[LayeredPosition, Tuple[LayeredPosition, Agent]]) -> bool:
-        if isinstance(pos_or_content, LayeredPosition):
-            return pos_or_content.pos in self.laters[pos_or_content.layer]
-        else:
-            return (pos_or_content[0].pos, pos_or_content[1]) in self.layers[pos_or_content[0].layer]
+    def __contains__(self, pos: LayeredPosition) -> bool:
+        return pos.pos in self.layers[pos.layer]
 
     def contains_layer(self, layer_name: str) -> bool:
         return layer_name in self.layers
+
+    def get_common_positions(self) -> Iterator[Position]:
+        """This could potentially be a very expensive call.  It depends entirely
+        on what the layers are doing, how they ar eimplemented, how large they
+        are, etc."""
+        continuous_spaces = {}
+        common_discreet_positions = None
+        found_discreet = False
+
+        for layer in self.layers.values():
+            if not layer.is_continuous:
+                if common_discreet_positions is None:
+                    common_discreet_positions = set(layer.get_all_positions())
+                elif len(common_discreet_positions) == 0:
+                    break
+                else:
+                    common_discreet_positions |= set(layer.get_all_positions())
+            else:
+                continuous_spaces.add(layer)
+
+        if found_discreet and len(common_discreet_positions) == 0:
+            return
+        elif found_discreet:
+            for pos in common_discreet_positions:
+                if len(continuous_spaces) > 0:
+                    miss = False
+                    for space in continuous_spaces:
+                        if pos not in space:
+                            miss = True
+                            break
+                    if not miss:
+                        yield pos
+                else:
+                    yield pos
+        else:
+            raise NotImplementedError("Left medium (to heavy..?) lifting until later")
 
     # From _AgentSpace
     def place_agent(self, agent: Agent, pos: LayeredPosition) -> None:
