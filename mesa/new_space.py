@@ -40,21 +40,9 @@ class _AbstractSpace(ABC):
     def is_continuous(self) -> bool:
         """Return whether the space is continuous or discreet."""
 
-    '''
-    Getting way to complicated here, leave this until much later...
-
-    @property
     @abstractmethod
-    def is_cell_fixed(self) -> Optional[bool]:
-        """Return whether cells of a discreet space are fixed in size, None if
-        the space is continuous."""
-
-    @property
-    @abstractmethod
-    def cell_dimensions(self) -> Union[Number, Tuple[Number, ...], None]:
-        """Return the cell dimensions if the cell size is fixed and the space is
-        discreet."""
-    '''
+    def __contains__(self, pos_or_content: Union[Position, Content]) -> bool:
+        """Returns wether a point or content is in the space."""
 
     @abstractmethod
     def neighborhood_at(self, pos: Position, radius: Number = 1, include_own: bool = True) -> Union[Iterator[Position], _AbstractSpace]:
@@ -84,10 +72,6 @@ class _AgentSpace(_AbstractSpace):
     def __delitem__(self, content: Tuple[Position, Agent]) -> None:
         """Delete content from the position in self.
         Called by `del _AbstractSpace()[pos, content]`."""
-
-    @abstractmethod
-    def __contains__(self, content: Tuple[Position, Agent]) -> bool:
-        """Determine if Agent is contained at Position in this space."""
 
     def place_agent(self, agent: Agent, pos: Position) -> None:
         """Place an agent at a specific position."""
@@ -181,6 +165,9 @@ class LayeredSpace(_AgentSpace, _PatchSpace):
         super().__init__()
         self.layers: Dict[str, _AbstractSpace] = {}
 
+    def get_layer(self, layer: str) -> _AbstractSpace:
+        return self.layers[layer]
+
     # From _AbstractSpace
     def __getitem__(self, pos: LayeredPosition) -> Content:
         return self.layers[pos.layer][pos.pos]
@@ -189,14 +176,25 @@ class LayeredSpace(_AgentSpace, _PatchSpace):
     def __setitem__(self, pos: LayeredPosition, content: Content) -> None:
         self.layers[pos.layer][pos.pos] = content
 
+    def set_layer(self, layer_name:str, layer: _AbstractSpace) -> None:
+        self.layers[layer_name] = layer
+
     # From _AgentSpace
     def __delitem__(self, content: Tuple[LayeredPosition, Content]) -> None:
         self.layers[content[0].layer].__delitem__( (content[0].pos, content[1]) )
 
+    def del_layer(self, layer_name: str) -> None:
+        del self.layers[layer_name]
+
     # From _AgentSpace
-    @abstractmethod
-    def __contains__(self, content: Tuple[LayeredPosition, Agent]) -> bool:
-        return (content[0].pos, content[1]) in self.layers[content[0].layer]
+    def __contains__(self, pos_or_content: Union[LayeredPosition, Tuple[LayeredPosition, Agent]]) -> bool:
+        if isinstance(pos_or_content, LayeredPosition):
+            return pos_or_content.pos in self.laters[pos_or_content.layer]
+        else:
+            return (pos_or_content[0].pos, pos_or_content[1]) in self.layers[pos_or_content[0].layer]
+
+    def contains_layer(self, layer_name: str) -> bool:
+        return layer_name in self.layers
 
     # From _AgentSpace
     def place_agent(self, agent: Agent, pos: LayeredPosition) -> None:
