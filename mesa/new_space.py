@@ -1,15 +1,16 @@
 from abc import ABC, abstractmethod
 from mesa.agent import Agent
 from typing import Any, Tuple, Set, Union, Optional, Callable, NamedTuple, Dict, \
-    NewType, Iterator, SupportsInt, SupportsFloat, cast
+    NewType, Iterator, Type, cast
 from collections import namedtuple
 from itertools import chain
 from math import pow, sqrt
 from inspect import stack
+import sys
 
 Position = Any
 Content = Any
-Distance = Union[SupportsInt, SupportsFloat]
+Distance = Union[int, float]
 
 GridCoordinate = Tuple[int, int]
 CellContent = Set[Any]
@@ -26,29 +27,47 @@ class _Metric(ABC):
     For simple measures, e.g. a 2-D grid or continuous space with a Chebyshev or
     Euclidian metric, this should of course of exact.
     """
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def distance(pos1: Position, pos2: Position) -> Distance:
+    def distance(cls, pos1: Position, pos2: Position) -> Distance:
         """Returns the distance (real) bewteen two positions"""
 
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def path_length(path: Iterator[Position]) -> Distance:
+    def path_length(cls, path: Iterator[Position]) -> Distance:
         """Returns the distance (real) along a given path/iterator of positions"""
 
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def neighborhood(center: Position, radius: Distance) -> Union[Iterator[Position], _AbstractSpace]:
+    def neighborhood(cls, center: Position, radius: Distance) -> Union[Iterator[Position], _AbstractSpace]:
         """Returns the neighborhood of a point with the given radius.  Returns an
         iterator of Position's if a discreet space, or a (sub)_AbstractSpace if
         continuous."""
 
 
+def _null_consistency_check(space: _AbstractSpace, pos: Position, content: Content) -> bool:
+    return True
+
+
+class _NullMetric(_Metric):
+    @classmethod
+    def distance(cls, pos1: Position, pos2: Position) -> Distance:
+        return 0
+
+    @classmethod
+    def path_length(cls, path: Iterator[Position]) -> Distance:
+        return 0
+
+    @classmethod
+    def neighborhood(cls, center: Position, radius: Distance) -> Union[Iterator[Position], _AbstractSpace]:
+        return iter([])
+
+
 class _AbstractSpace(ABC):
     @abstractmethod
     def __init__(self,
-                consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None,
-                metric: _Metric = None) -> None:
+                consistency_check: Callable[[_AbstractSpace, Position, Content], bool],
+                metric: Union[_Metric, Type[_Metric]]) -> None:
         super().__init__()
         self.consistency_check = consistency_check
         self.metric = metric
@@ -105,8 +124,8 @@ class _AbstractSpace(ABC):
 class _AgentSpace(_AbstractSpace):
     @abstractmethod
     def __init__(self,
-                consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None,
-                metric: _Metric = None) -> None:
+                consistency_check: Callable[[_AbstractSpace, Position, Content], bool],
+                metric: Union[_Metric, Type[_Metric]]) -> None:
         super().__init__(consistency_check, metric)
         self._agent_to_pos: Dict[Agent, Position] = {}
 
@@ -166,9 +185,9 @@ class _PatchSpace(_AbstractSpace):
     """
     @abstractmethod
     def __init__(self,
-                consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None,
-                metric: _Metric = None,
-                patch_name: str = None) -> None:
+                consistency_check: Callable[[_AbstractSpace, Position, Content], bool],
+                metric: Union[_Metric, Type[_Metric]],
+                patch_name: str) -> None:
         super().__init__(consistency_check, metric)
         """Include path_name because for e.g. pure numeric patches there isn't
         any other identifying information."""
@@ -267,7 +286,7 @@ class LayeredSpace(_AgentSpace):
     place_agent, and remove_agent methods to be wrapped.
     """
     def __init__(self, layers: Dict[str, _AbstractSpace] = {}):
-        super().__init__()
+        super().__init__(_null_consistency_check, _NullMetric)
         self.layers: Dict[str, _AbstractSpace] = layers
         self._agent_to_layer: Dict[Agent, str] = {}
 
@@ -353,79 +372,101 @@ class LayeredSpace(_AgentSpace):
         """Place an agent at a specific position."""
         if isinstance(self.layers[pos.layer], _AgentSpace):
             cast(_AgentSpace, self.layers[pos.layer]).place_agent(agent, pos.pos)
+            self._agent_to_layer[agent] = pos.layer
         else:
             raise TypeError("Cannot add agent to layer '{}' because it is not of type _AgentSpace".format(pos.layer))
-
-
-############################################Pickup#################################
-
-
 
     # From _AgentSpace
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
-        self.layers[getattr(agent, "layer")].remove_agent(agent, getattr(agent, "pos"))
+        if isinstance(self.layers[self._agent_to_layer[agent]], _AgentSpace):
+            cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).remove_agent(agent)
+        else:
+            raise TypeError("Something went wrong!  Cannot remove agent {} because \
+                it is mapped to layer {}, which is not an _AgentSpace.  The layer \
+                mapping has been removed.".format(agent, self._agent_to_layer[agent]))
+        del self._agent_to_layer[agent]
 
     def agents_at(self, pos: Union[Position, LayeredPosition]) -> Iterator[Agent]:
         """Yield the agents at a specific position within a specific layer if
         the passed `pos` is of type `LayeredPosition`, else yield the agents at
         the passed `Position` for all layers"""
-        if instanceof(pos, LayeredPosition):
-            return self.layers[pos.layer].agents_at(pos.pos)
+        if isinstance(pos, LayeredPosition):
+            if isinstance(self.layers[pos.layer], _AgentSpace):
+                return cast(_AgentSpace, self.layers[pos.layer]).agents_at(pos.pos)
+            else:
+                raise TypeError("Cannot return agents from layer '{}', it is not \
+                    an instance of _AgentSpace.".format(pos.layer))
         else:
-            return chain(*[l.agents_at(pos) for l in self.layers.values if instanceof(l, _AgentSpace)])
+            return chain(*[l.agents_at(pos) for l in self.layers.values() if isinstance(l, _AgentSpace)])
 
-    def neighbors_at(self, pos: Union[Position, LayeredPosition], radius: Number = 1) -> Iterator[Agent]:
+    def neighbors_at(self, pos: Union[Position, LayeredPosition], radius: Distance = 1, include_own: bool = True) -> Iterator[Agent]:
         """Yield the agents in proximity to a position."""
-        if instanceof(pos, LayeredPosition):
-            return self.layers[pos.layer].neighbors_at(pos.pos, radius)
+        if isinstance(pos, LayeredPosition):
+            if isinstance(self.layers[pos.layer], _AgentSpace):
+                return cast(_AgentSpace, self.layers[pos.layer]).neighbors_at(pos.pos, radius, include_own)
+            else:
+                raise TypeError("Cannot get neighbors at pos '{}' in layer '{}' \
+                    because it is not of type _AgentSpace".format(pos.pos, pos.layer))
         else:
-            return chain(*[l.neighbors_at(pos, radius) for l in self.layers.values if instanceof(l, _AgentSpace)])
+            return chain(*[l.neighbors_at(pos, radius, include_own) for l in self.layers.values() if isinstance(l, _AgentSpace)])
 
-    def neighbors_of(self, agent: Agent, radius: Number = 1) -> Iterator[Agent]:
+    def neighbors_of(self, agent: Agent, radius: Distance = 1, include_own: bool = True) -> Iterator[Agent]:
         """Yield the neighbors of an agent."""
-        return self.layers[getattr(agent, "layer")].neighbors_of(agent, radius)
+        return cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).neighbors_of(agent, radius, include_own)
 
-    def neighborhood_of(self, agent: Agent, radius: Number = 1, include_own: bool = True) -> Union[Iterator[LayeredPosition], AgentSpace]:
+    def neighborhood_of(self, agent: Agent, radius: Distance = 1, include_own: bool = True) -> Union[Iterator[Position], _AbstractSpace]:
         """Yield the neighborhood of an agent."""
-        return self.layers[getattr(agent, "layer")].neighborhood_of(agent, radius, include_own)
+        return cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_own)
 
 
-class EuclidianGridMetric(_Metric):
-    @staticmethod
-    def distance(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
+class GridMetric(_Metric):
+    @classmethod
+    def path_length(cls, path: Iterator[Position]) -> Distance:
+        ret: Distance = 0
+        pos1: Position = next(path)
+        for pos2 in path:
+            ret += cls.distance(pos1, pos2)
+            pos1 = pos2
+
+        return ret
+
+
+class EuclidianGridMetric(GridMetric):
+    @classmethod
+    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate) -> Distance:
         return sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2)
 
-    @staticmethod
-    def neighborhood(center: GridCoordinate, radius: int) -> Iterator[GridCoordinate]:
+    @classmethod
+    def neighborhood(cls, center: GridCoordinate, radius: Distance) -> Iterator[GridCoordinate]:
         # This is ugly and inefficient, but this will grind out the needed result
-        for y in range(-radius, radius+1):
-            for x in range(-radius, radius+1):
-                if sqrt(y**2 + x**2) <= radius:
+        for y in range(-int(radius), int(radius)+1):
+            for x in range(-int(radius), int(radius)+1):
+                if cls.distance((0, 0), (x, y)) <= radius:
                     yield (center[0]+x, center[1]+y)
 
 
-class ManhattanGridMetric(_Metric):
-    @staticmethod
-    def manhattan(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
+class ManhattanGridMetric(GridMetric):
+    @classmethod
+    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate) -> Distance:
         return abs(coord1[0]-coord2[0]) + abs((coord1[1]-coord2[1]))
 
-    @staticmethod
-    def neighborhood(center: GridCoordinate, radius: int) -> Iterator[Position]:
-        for y in range(-radius, radius+1):
-            for x in range(abs(y)-radius, radius-abs(y)+1):
+    @classmethod
+    def neighborhood(cls, center: GridCoordinate, radius: Distance) -> Iterator[Position]:
+        for y in range(-int(radius), int(radius)+1):
+            for x in range(abs(y)-int(radius), int(radius)-abs(y)+1):
                 yield (center[0]+x, center[1]+y)
 
 
-class ChebyshevGridMetric(_Metric):
-    @staticmethod
-    def chebyshev(coord1: GridCoordinate, coord2: GridCoordinate) -> Real:
+class ChebyshevGridMetric(GridMetric):
+    @classmethod
+    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate) -> Distance:
         return max(abs(coord1[0]-coord2[0]), abs((coord1[1]-coord2[1])))
 
-    @staticmethod
-    def neighborhood(center: GridCoordinate, radius: int) -> Iterator[Position]:
-        for y in range(-radius, radius+1):
-            for x in range(-radius, radius+1):
+    @classmethod
+    def neighborhood(cls, center: GridCoordinate, radius: Distance) -> Iterator[Position]:
+        for y in range(-int(radius), int(radius)+1):
+            for x in range(-int(radius), int(radius)+1):
                 yield (center[0]+x, center[1]+y)
 
 
@@ -438,37 +479,40 @@ class GridConsistencyChecks:
         try:
             func_name = sys._getframe(2).f_code.co_name
         except:
-            if not warn_flag:
-                warn_flag = True
+            if not GridConsistencyChecks.warn_flag:
+                GridConsistencyChecks.warn_flag = True
                 raise ResourceWarning("sys._getframe(2).f_code.co_name is unavailable, using much slower inspect.stack()!")
-            func_name = inspect.stack()[2].function
+            func_name = stack()[2].function
 
         if func_name == "":
-            raise ValueException("Unable to get source method name for GridConsistencyChecks")
+            raise ValueError("Unable to get source method name for GridConsistencyChecks")
 
         return func_name
 
     @staticmethod
     def max1(grid: Grid, coord: GridCoordinate, agent: Agent) -> bool:
-        caller = _get_caller()
+        caller = GridConsistencyChecks._get_caller()
 
         if caller == "__setitem__":
             return not len(grid[coord])
 
+        return True
+
     @staticmethod
     def unique(grid: Grid, coord: GridCoordinate, agent: Agent) -> bool:
-        caller = _get_caller()
+        caller = GridConsistencyChecks._get_caller()
 
         if caller == "__setitem__":
             return type(agent) not in map(type, grid[coord])
 
+        return True
+
 
 class Grid(_AgentSpace):
     def __init__(self, width: int, height: int,
-                consistency_check: Callable[[Grid, GridCoordinate, Agent, str], bool] = ConsistencyChecks.max1,
-                metric: _Metric = ChebyshevGridMetric):
-        super().__init__(consisitency_check, metric)
-
+                consistency_check: Callable[[Grid, GridCoordinate, Agent], bool] = GridConsistencyChecks.max1,
+                metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric):
+        super().__init__(cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check), metric)
         self.width = width
         self.height = height
         self._grid: Dict[GridCoordinate, CellContent] = dict()
@@ -503,23 +547,19 @@ class Grid(_AgentSpace):
     def __contains__(self, item: Tuple[GridCoordinate, Agent]) -> bool:
         return item[1] in self._grid[item[0]]
 
-    def neighborhood_at(self, pos: GridCoordinate, radius: int = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
         """Yield the neighborhood at a position, either an iterator over the
         positions or an _AbstractSpace containing only the subspace of the
         neighborhood."""
         if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
-            for n in self.metric.neighborhood(pos, radius):
+            for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius)):
                 if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
                     yield n
 
-    def agents_at(self, pos: GridCoordinate) -> Iterator[Agent]:
+        raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+
+    def agents_at(self, pos: Position) -> Iterator[Agent]:
         return iter(self._grid[pos])
 
-    def neighbors_at(self, pos: GridCoordinate, radius: Number = 1) -> Iterator[Agent]:
-        neighborhood_at
-
-    def neighbors_of(self, agent: Agent, radius: Number = 1) -> Iterator[Agent]:
-        """Yield the neighbors of an agent."""
-
-    def neighborhood_of(self, agent: Agent, radius: Number = 1, include_own: bool = True) -> Union[Iterator[GridCoordinate], AgentSpace]:
-        """Yield the neighborhood of an agent."""
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Agent]:
+        return chain(*[self.agents_at(pos) for n in self.neighborhood_at(pos, radius, include_own)])
