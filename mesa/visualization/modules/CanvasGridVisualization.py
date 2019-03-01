@@ -84,7 +84,7 @@ class CanvasGrid(VisualizationElement):
         grid_state = defaultdict(list)
         for x in range(model.grid.width):
             for y in range(model.grid.height):
-                cell_objects = model.grid.get_cell_list_contents([(x, y)])
+                cell_objects = model.grid.agents_at((x, y))
                 for obj in cell_objects:
                     portrayal = self.portrayal_method(obj)
                     if portrayal:

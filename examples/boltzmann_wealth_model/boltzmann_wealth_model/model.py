@@ -1,6 +1,6 @@
 from mesa import Agent, Model
 from mesa.time import RandomActivation
-from mesa.space import MultiGrid
+from mesa.new_space import Grid
 from mesa.datacollection import DataCollector
 
 
@@ -22,7 +22,7 @@ class BoltzmannWealthModel(Model):
 
     def __init__(self, N=100, width=10, height=10):
         self.num_agents = N
-        self.grid = MultiGrid(height, width, True)
+        self.grid = Grid(height, width, True, None)
         self.schedule = RandomActivation(self)
         self.datacollector = DataCollector(
             model_reporters={"Gini": compute_gini},
@@ -35,7 +35,7 @@ class BoltzmannWealthModel(Model):
             # Add the agent to a random grid cell
             x = self.random.randrange(self.grid.width)
             y = self.random.randrange(self.grid.height)
-            self.grid.place_agent(a, (x, y))
+            self.grid.place_agent((x, y), a)
 
         self.running = True
         self.datacollector.collect(self)
@@ -57,14 +57,14 @@ class MoneyAgent(Agent):
         self.wealth = 1
 
     def move(self):
-        possible_steps = self.model.grid.get_neighborhood(
-            self.pos, moore=True, include_center=False
-        )
+        possible_steps = list(self.model.grid.neighborhood_of(self, include_own=False))
         new_position = self.random.choice(possible_steps)
-        self.model.grid.move_agent(self, new_position)
+        self.model.grid.move_agent(new_position, self)
 
     def give_money(self):
-        cellmates = self.model.grid.get_cell_list_contents([self.pos])
+        cellmates = list(self.model.grid.neighbors_of(self, 0))
+        # Alternatively:
+        # cellmates = self.model.grid.agents_at(self.model.grid.find_agent(self))
         if len(cellmates) > 1:
             other = self.random.choice(cellmates)
             other.wealth += 1
