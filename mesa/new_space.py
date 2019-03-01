@@ -80,17 +80,17 @@ class _AbstractSpace(ABC):
         at the passed position."""
 
     @abstractmethod
-    def __getitem__(self, pos: Position) -> Content:
-        """Return the content or value of self at a position.
+    def __getitem__(self, pos: Position) -> Union[Iterator[Content], Content]:
+        """Return the content or value at a position, *or an iterator over such.*
         Called by `_AbstractSpace()[pos]`."""
 
     @abstractmethod
     def __setitem__(self, pos: Position, content: Content) -> None:
-        """Set the content or value at a position.
+        """*Sets or adds* the content or value at a position.
         Called by `_AbstractSpace()[pos] = content`."""
 
     @abstractmethod
-    def __delitem__(self, pos: Position) -> None:
+    def __delitem__(self, pos_or_content: Union[Position, Content]) -> None:
         """Delete content or value at a position.  This should *not* remove the
         position itself (e.g. unlike `del dict[key]`).  E.g. a Grid implementation
         should should still return some 'empty' value for coordinates that are
@@ -108,19 +108,22 @@ class _AgentSpace(_AbstractSpace):
                 consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None,
                 metric: _Metric = None) -> None:
         super().__init__(consistency_check, metric)
+        self._agent_to_pos: Dict[Agent, Position] = {}
 
-    @abstractmethod
-    def place_agent(self, agent: Agent, pos: Position) -> None:
+    def place_agent(self, pos: Position, agent: Agent) -> None:
         """Place an agent at a specific position."""
+        self[pos] = agent
+        self._agent_to_pos[agent] = pos
 
-    @abstractmethod
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
+        pos = self._agent_to_pos.pop(agent)
+        del self[agent]
 
-    def move_agent(self, agent: Agent, pos: Position) -> None:
+    def move_agent(self, pos: Position, agent: Agent) -> None:
         """Move an agent from its current to a new position."""
         self.remove_agent(agent)
-        self.place_agent(agent, pos)
+        self.place_agent(pos, agent)
 
     @abstractmethod
     def agent_exists(self, agent: Agent) -> bool:
@@ -346,7 +349,7 @@ class LayeredSpace(_AgentSpace):
             raise NotImplementedError("Left medium (to heavy..?) lifting until later")
 
     # From _AgentSpace
-    def place_agent(self, agent: Agent, pos: LayeredPosition) -> None:
+    def place_agent(self, pos: LayeredPosition, agent: Agent) -> None:
         """Place an agent at a specific position."""
         if isinstance(self.layers[pos.layer], _AgentSpace):
             cast(_AgentSpace, self.layers[pos.layer]).place_agent(agent, pos.pos)
@@ -354,7 +357,7 @@ class LayeredSpace(_AgentSpace):
             raise TypeError("Cannot add agent to layer '{}' because it is not of type _AgentSpace".format(pos.layer))
 
 
-
+############################################Pickup#################################
 
 
 
