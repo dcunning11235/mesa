@@ -16,9 +16,16 @@ Position = Any
 Content = Any
 Distance = Union[int, float]
 
+'''
 class GridCoordinate(NamedTuple):
     x: int
     y: int
+'''
+GridCoordinate = Tuple[int, int]
+
+class LayeredPosition(NamedTuple):
+    layer: str
+    pos: Position
 
 
 class _Metric(ABC):
@@ -67,8 +74,8 @@ class _NullMetric(_Metric):
 class _AbstractSpace(ABC):
     @abstractmethod
     def __init__(self,
-                consistency_check: Callable[['_AbstractSpace', Position, Content], bool],
-                metric: Union[_Metric, Type[_Metric]]) -> None:
+                metric: Union[_Metric, Type[_Metric]],
+                consistency_check: Callable[['_AbstractSpace', Position, Content], bool] = None) -> None:
         super().__init__()
         self.consistency_check = consistency_check
         self.metric = metric
@@ -95,7 +102,7 @@ class _AbstractSpace(ABC):
         neighborhood."""
 
     @abstractmethod
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Content]:
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Content]]:
         """Yield the neighbors in proximity to a position, possible including those
         at the passed position."""
 
@@ -125,9 +132,9 @@ class _AbstractSpace(ABC):
 class _AgentSpace(_AbstractSpace):
     @abstractmethod
     def __init__(self,
-                consistency_check: Callable[[_AbstractSpace, Position, Content], bool],
-                metric: Union[_Metric, Type[_Metric]]) -> None:
-        super().__init__(consistency_check, metric)
+                metric: Union[_Metric, Type[_Metric]],
+                consistency_check: Callable[[_AbstractSpace, Position, Content], bool]  = None) -> None:
+        super().__init__(metric, consistency_check)
         self._agent_to_pos: Dict[Agent, Position] = {}
 
     def place_agent(self, pos: Position, agent: Agent) -> None:
@@ -158,19 +165,14 @@ class _AgentSpace(_AbstractSpace):
     @property
     def agents(self) -> Iterator[Agent]:
         """Returns all agents within the space."""
-        return self._agent_to_pos.keys()
-
-    @abstractmethod
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Agent]:
-        """Yield the agents in proximity to a position, possible including those
-        at the passed position."""
+        return iter(self._agent_to_pos.keys())
 
     def agents_at(self, pos: Position) -> Iterator[Agent]:
         """Yield the neighbors at a given position (i.e. neighnors_at, but with
         radius=0)."""
-        return self.neighbors_at(pos, 0, False)
+        return map(lambda tup: tup[1], self.neighbors_at(pos, 0, False))
 
-    def neighbors_of(self, agent: Agent, radius: Distance = 1, include_own: bool = True) -> Iterator[Agent]:
+    def neighbors_of(self, agent: Agent, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the agents that are the neighbors of a given agent, including
         itself possibly."""
         return self.neighbors_at(self.find_agent(agent), radius, include_own)
@@ -189,9 +191,9 @@ class _PatchSpace(_AbstractSpace):
     @abstractmethod
     def __init__(self,
                 patch_name: str,
-                consistency_check: Callable[[_AbstractSpace, Position, Content], bool],
-                metric: Union[_Metric, Type[_Metric]]) -> None:
-        super().__init__(consistency_check, metric)
+                metric: Union[_Metric, Type[_Metric]],
+                consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None) -> None:
+        super().__init__(metric, consistency_check)
         """Include path_name because for e.g. pure numeric patches there isn't
         any other identifying information."""
         self.patch_name = patch_name
@@ -202,11 +204,11 @@ class _PatchSpace(_AbstractSpace):
         """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     @abstractmethod
-    def __iadd__(self, other: Any) -> None:
+    def __iadd__(self, other: Any) -> '_PatchSpace':
         """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     @abstractmethod
-    def __radd__(self, other: Any) -> None:
+    def __radd__(self, other: Any) -> '_PatchSpace':
         """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     @abstractmethod
@@ -214,56 +216,52 @@ class _PatchSpace(_AbstractSpace):
         """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
 
     @abstractmethod
-    def __isub__(self, other: Any) -> None:
+    def __isub__(self, other: Any) -> '_PatchSpace':
         """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
 
     @abstractmethod
-    def __rsub__(self, other: Any) -> None:
+    def __rsub__(self, other: Any) -> '_PatchSpace':
         """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
 
     @abstractmethod
-    def __mul__(self, other: Any) -> None:
+    def __mul__(self, other: Any) -> '_PatchSpace':
         """Element-by-element multiply values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
     @abstractmethod
-    def __imul__(self, other: Any) -> None:
+    def __imul__(self, other: Any) -> '_PatchSpace':
         """Element-by-element multiplication of values of one _PatchSpace by
         another _PatchSpace, scalar, etc."""
 
     @abstractmethod
-    def __rmul__(self, other: Any) -> None:
+    def __rmul__(self, other: Any) -> '_PatchSpace':
         """Element-by-element multiplication of values of one _PatchSpace by
         another _PatchSpace, scalar, etc."""
 
     @abstractmethod
-    def __div__(self, other: Any) -> None:
+    def __div__(self, other: Any) -> '_PatchSpace':
         """Element-by-element division of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
     @abstractmethod
-    def __idiv__(self, other: Any) -> None:
+    def __idiv__(self, other: Any) -> '_PatchSpace':
         """Element-by-element division of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
     @abstractmethod
-    def __pow__(self, other: Any) -> None:
+    def __pow__(self, other: Any) -> '_PatchSpace':
         """Element-by-element power of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
     @abstractmethod
-    def __ipow__(self, other: Any) -> None:
+    def __ipow__(self, other: Any) -> '_PatchSpace':
         """Element-by-element power of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
     @abstractmethod
     def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Content]]:
-        """Yield the agents in proximity to a position, possible including those
+        """Yield the patches in proximity to a position, possible including those
         at the passed position."""
-
-    @abstractmethod
-    def value_at(self, pos: Position) -> Content:
-        """Yield the value at a given position."""
 
     @abstractmethod
     def step(self) -> None:
@@ -272,11 +270,6 @@ class _PatchSpace(_AbstractSpace):
         call of step.
         """
         self.steps += 1
-
-
-class LayeredPosition(NamedTuple):
-    layer: str
-    pos: Position
 
 
 # Relies on __getitem__  on _AbstractSpace implementations not throwing
@@ -289,7 +282,7 @@ class LayeredSpace(_AgentSpace):
     place_agent, and remove_agent methods to be wrapped.
     """
     def __init__(self, layers: Dict[str, _AbstractSpace] = {}):
-        super().__init__(None, _NullMetric)
+        super().__init__(_NullMetric)
         self.layers: Dict[str, _AbstractSpace] = layers
         self._agent_to_layer: Dict[Agent, str] = {}
 
@@ -416,7 +409,7 @@ class LayeredSpace(_AgentSpace):
         else:
             return chain(*[l.agents_at(pos) for l in self.layers.values() if isinstance(l, _AgentSpace)])
 
-    def neighbors_at(self, pos: Union[Position, LayeredPosition], radius: Distance = 1, include_own: bool = True) -> Iterator[Agent]:
+    def neighbors_at(self, pos: Union[Position, LayeredPosition], radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the agents in proximity to a position."""
         if isinstance(pos, LayeredPosition):
             if isinstance(self.layers[pos.layer], _AgentSpace):
@@ -427,7 +420,7 @@ class LayeredSpace(_AgentSpace):
         else:
             return chain(*[l.neighbors_at(pos, radius, include_own) for l in self.layers.values() if isinstance(l, _AgentSpace)])
 
-    def neighbors_of(self, agent: Agent, radius: Distance = 1, include_own: bool = True) -> Iterator[Agent]:
+    def neighbors_of(self, agent: Agent, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the neighbors of an agent."""
         return cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).neighbors_of(agent, radius, include_own)
 
@@ -495,8 +488,8 @@ class ConsistencyChecks:
         try:
             func_name = sys._getframe(2).f_code.co_name
         except:
-            if not GridConsistencyChecks.warn_flag:
-                GridConsistencyChecks.warn_flag = True
+            if not ConsistencyChecks.warn_flag:
+                ConsistencyChecks.warn_flag = True
                 raise ResourceWarning("sys._getframe(2).f_code.co_name is unavailable, using much slower inspect.stack()!")
             func_name = stack()[2].function
 
@@ -520,7 +513,7 @@ class ConsistencyChecks:
 class AgentConsistencyChecks(ConsistencyChecks):
     @staticmethod
     def max1(space: _AgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
-        caller = GridConsistencyChecks._get_caller()
+        caller = ConsistencyChecks._get_caller()
 
         if caller == "__setitem__":
             val = space[coord]
@@ -531,7 +524,7 @@ class AgentConsistencyChecks(ConsistencyChecks):
 
     @staticmethod
     def unique(space: _AgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
-        caller = GridConsistencyChecks._get_caller()
+        caller = ConsistencyChecks._get_caller()
 
         if caller == "__setitem__":
             val = space[coord]
@@ -540,17 +533,19 @@ class AgentConsistencyChecks(ConsistencyChecks):
 
         return True
 
+# Need to create a e.g. Cartesian abstract class that is a space indexed by (x, y)???
+# class _Grid()...
 
 class Grid(_AgentSpace):
     def __init__(self,
                 width: int, height: int, torus: bool,
-                consistency_check: Callable[[_AgentSpace, GridCoordinate, Agent], bool] = GridConsistencyChecks.max1,
-                metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric):
-        super().__init__(cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check), metric)
+                metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric,
+                consistency_check: Callable[[_AgentSpace, GridCoordinate, Agent], bool] = AgentConsistencyChecks.max1):
+        super().__init__(metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
         self.width = width
         self.height = height
         self.torus = torus
-        self._grid: Dict[GridCoordinate, CellContent] = dict()
+        self._grid: Dict[GridCoordinate, Set] = dict()
 
     @property
     def default_value(self) -> Set:
@@ -582,14 +577,14 @@ class Grid(_AgentSpace):
             self._grid[pos] = set([agent, ])
 
     def __delitem__(self, pos_or_content: Union[GridCoordinate, Agent]) -> None:
-        if isinstance(pos_or_content, GridCoordinate):
+        if isinstance(pos_or_content, tuple):
             pos = self._translate_coord(pos_or_content)
             self._grid[pos].clear()
         else:
             self._grid[self._agent_to_pos[pos_or_content]].remove(pos_or_content)
 
     def __contains__(self, pos_or_content: Union[GridCoordinate, Agent]) -> bool:
-        if isinstance(pos_or_content, GridCoordinate):
+        if isinstance(pos_or_content, tuple):
             pos = self._translate_coord(pos_or_content)
             return 0 <= pos[0] <= self.width and 0 <= pos[1] < self.height
         else:
@@ -599,7 +594,7 @@ class Grid(_AgentSpace):
         if pos in self:
             return self.default_value
 
-        LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+        raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
 
     def neighborhood_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
         if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
@@ -612,8 +607,8 @@ class Grid(_AgentSpace):
     def agents_at(self, pos: Position) -> Iterator[Agent]:
         return iter(self[pos])
 
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Agent]:
-        return chain(*[self.agents_at(pos) for n in self.neighborhood_at(pos, radius, include_own)])
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[GridCoordinate, Agent]]:
+        return chain(*[map(lambda a: (pos, a), self.agents_at(pos)) for n in self.neighborhood_at(pos, radius, include_own)])
 
     def get_all_positions(self) -> Iterator[Position]:
         for y in range(self.height):
@@ -621,106 +616,112 @@ class Grid(_AgentSpace):
                 yield (x, y)
 
 
+class PatchConsistencyChecks(ConsistencyChecks):
+    @staticmethod
+    def gte0(space: _PatchSpace, coord: GridCoordinate, value: Content) -> bool:
+        caller = ConsistencyChecks._get_caller()
+
+        if caller == "__setitem__":
+            return value >=0
+
+        return True
+
+# An altrnative path would be to have NumpyPatchGrid actually extend numpy.ndarray
+# but I have some doubts. E.g. implementing consistency checks would require wrapping
+# most methods, less so but still with torus, etc.  That is all "fine", though it
+# doesn't save work.  Worse, would have to disable e.g. being able to reshape,
+# in-place sort, and changing of various lower-level flags etc.  But it would be
+# neat if we just extended it...
 class NumpyPatchGrid(_PatchSpace):
     def __init__(self,
             patch_name: str, init_val: np.ndarray, torus: bool,
-            consistency_check: Callable[[_PatchSpace, GridCoordinate, Agent], bool] = PatchConsistencyChecks.gt0,
-            metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric):
-        super().__init__(patch_name, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check), metric)
+            metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric,
+            consistency_check: Callable[[_PatchSpace, GridCoordinate, Agent], bool] = PatchConsistencyChecks.gte0):
+        super().__init__(patch_name, metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
         self.torus = torus
         if init_val.ndim != 2:
             raise TypeError("NumericPatchGrid may only be initilialized with a ndarray of dimension 2")
-        self._grid = np.copy(init_val)
+        self._grid = np.array(init_val)  # We don't need no stinkin' matrices here
         self.height, self.width = self._grid.shape
 
-    @abstractmethod
+    def _verify_other(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> Union[np.ndarray, int, float]:
+        if isinstance(other, NumpyPatchGrid) or isinstance(other, np.ndarray):
+            if isinstance(other, NumpyPatchGrid):
+                ret = other._grid
+            else:
+                ret = other
+
+            if self._grid.shape != ret.shape:
+                raise TypeError("Incompatiable shape for passed grid, must be {}".format(self._grid.shape))
+        else:
+            ret = other
+
+        return ret
+
     def __add__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
-                            self.consistency_check, self.metric)
+                            self.metric, self.consistency_check)
         ret += other
         return ret
 
-    @abstractmethod
-    def __iadd__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> -> 'NumpyPatchGrid':
-        if isinstance(other, NumpyPatchGrid) or isinstance(other, np.ndarray):
-            if isinstance(other, NumpyPatchGrid)
-                other_arr = other._grid
-            else:
-                other_arr = other
-
-            if self._grid.shape == other_arr.shape:
-                self._grid += other_arr
-            else:
-                raise TypeError("Incompatiable shape for passed grid, must be {}".format(self._grid.shape))
-        else:
-            self._grid += other
-
+    def __iadd__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+        self._grid += self._verify_other(other)
         return self
 
-    @abstractmethod
-    def __radd__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+    __radd__ = __add__
 
-    @abstractmethod
     def __sub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
-        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
+                            self.metric, self.consistency_check)
+        ret -= other
+        return ret
 
-    @abstractmethod
-    def __isub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+    def __isub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+        self._grid -= self._verify_other(other)
+        return self
 
-    @abstractmethod
-    def __rsub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+    __rsub__ = __sub__
 
-    @abstractmethod
-    def __mul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Element-by-element multiply values of one _PatchSpace by another
-        _PatchSpace, scalar, etc."""
+    def __mul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
+                            self.metric, self.consistency_check)
+        ret *= other
+        return ret
 
-    @abstractmethod
-    def __imul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Element-by-element multiplication of values of one _PatchSpace by
-        another _PatchSpace, scalar, etc."""
+    def __imul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+        self._grid *= self._verify_other(other)
+        return self
 
-    @abstractmethod
-    def __rmul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Element-by-element multiplication of values of one _PatchSpace by
-        another _PatchSpace, scalar, etc."""
+    __rmul__ = __mul__
 
-    @abstractmethod
-    def __div__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Element-by-element division of values of one _PatchSpace by another
-        _PatchSpace, scalar, etc."""
+    def __div__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
+                            self.metric, self.consistency_check)
+        ret /= other
+        return ret
 
-    @abstractmethod
-    def __idiv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Element-by-element division of values of one _PatchSpace by another
-        _PatchSpace, scalar, etc."""
+    def __idiv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+        self._grid /= self._verify_other(other)
+        return self
 
-    @abstractmethod
-    def __pow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Element-by-element power of values of one _PatchSpace by another
-        _PatchSpace, scalar, etc."""
+    def __pow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
+                            self.metric, self.consistency_check)
+        ret **= other
+        return ret
 
-    @abstractmethod
-    def __ipow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
-        """Element-by-element power of values of one _PatchSpace by another
-        _PatchSpace, scalar, etc."""
+    def __ipow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+        self._grid **= self._verify_other(other)
+        return self
 
-    @abstractmethod
+    # ####Exactly the same as Grid!!!!
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
+        if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
+            for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius)):
+                if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
+                    yield n
+        else:
+            raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+
     def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Content]]:
-        """Yield the agents in proximity to a position, possible including those
-        at the passed position."""
-
-    @abstractmethod
-    def value_at(self, pos: Position) -> Content:
-        """Yield the value at a given position."""
-
-    @abstractmethod
-    def step(self) -> None:
-        """_PatchSpace is like model in that it has a step method, and like a
-        BaseScheduler in that it has a self.steps that is incremented with each
-        call of step.
-        """
-        self.steps += 1
+        return map(lambda pos: (pos, self._grid[pos]), self.neighborhood_at(pos, radius, include_own))
