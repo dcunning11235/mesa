@@ -22,7 +22,7 @@ class BoltzmannWealthModel(Model):
 
     def __init__(self, N=100, width=10, height=10):
         self.num_agents = N
-        self.grid = Grid(height, width, True, None)
+        self.grid = Grid(height, width, True)
         self.schedule = RandomActivation(self)
         self.datacollector = DataCollector(
             model_reporters={"Gini": compute_gini},
@@ -66,7 +66,7 @@ class MoneyAgent(Agent):
         # Alternatively:
         # cellmates = self.model.grid.agents_at(self.model.grid.find_agent(self))
         if len(cellmates) > 1:
-            other = self.random.choice(cellmates)
+            other = self.random.choice(cellmates)[1] # Now returns Iterator[(pos, agent)]
             other.wealth += 1
             self.wealth -= 1
 

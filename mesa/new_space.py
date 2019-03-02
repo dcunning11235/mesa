@@ -11,6 +11,7 @@ from inspect import stack
 import sys
 import collections
 import numpy as np
+import copy
 
 Position = Any
 Content = Any
@@ -246,12 +247,12 @@ class _PatchSpace(_AbstractSpace):
         another _PatchSpace, scalar, etc."""
 
     @abstractmethod
-    def __div__(self, other: Any) -> '_PatchSpace':
+    def __truediv__(self, other: Any) -> '_PatchSpace':
         """Element-by-element division of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
     @abstractmethod
-    def __idiv__(self, other: Any) -> '_PatchSpace':
+    def __itruediv__(self, other: Any) -> '_PatchSpace':
         """Element-by-element division of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
@@ -573,10 +574,10 @@ class Grid(_AgentSpace):
         return None
 
     def __getitem__(self, pos: GridCoordinate) -> set:
-        return self._grid.get(self._verify_coord(pos), self.default_value)
+        return self._grid.get(cast(GridCoordinate, self._verify_coord(pos)), self.default_value)
 
     def __setitem__(self, pos: GridCoordinate, agent: Agent) -> None:
-        pos = self._verify_coord(pos)
+        pos = cast(GridCoordinate, self._verify_coord(pos))
 
         if self.consistency_check is not None and self.consistency_check(self, pos, agent):
             try:
@@ -588,7 +589,7 @@ class Grid(_AgentSpace):
 
     def __delitem__(self, pos_or_content: Union[GridCoordinate, Agent]) -> None:
         if isinstance(pos_or_content, tuple):
-            pos = self._verify_coord(pos_or_content)
+            pos = cast(GridCoordinate, self._verify_coord(pos))
             self._grid[pos].clear()
         else:
             self._grid[self._agent_to_pos[pos_or_content]].remove(pos_or_content)
@@ -606,7 +607,7 @@ class Grid(_AgentSpace):
         raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
 
     def neighborhood_at(self, pos: GridCoordinate, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
-        pos = self._verify_coord(pos)
+        pos = cast(GridCoordinate, self._verify_coord(pos))
         for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius)):
             if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
                 yield n
@@ -666,8 +667,7 @@ class NumpyPatchGrid(_PatchSpace):
         return ret
 
     def __add__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
-        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
-                            self.metric, self.consistency_check)
+        ret = copy.copy(self)
         ret += other
         return ret
 
@@ -677,47 +677,45 @@ class NumpyPatchGrid(_PatchSpace):
 
     __radd__ = __add__
 
-    def __sub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
-        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
-                            self.metric, self.consistency_check)
+    def __sub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+        ret = copy.copy(self)
         ret -= other
         return ret
 
-    def __isub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+    def __isub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid -= self._verify_other(other)
         return self
 
     __rsub__ = __sub__
 
-    def __mul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
-        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
-                            self.metric, self.consistency_check)
+    def __mul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+        ret = copy.copy(self)
         ret *= other
         return ret
 
-    def __imul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+    def __imul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid *= self._verify_other(other)
         return self
 
     __rmul__ = __mul__
 
-    def __div__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
-        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
-                            self.metric, self.consistency_check)
+    def __truediv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+        ret = copy.copy(self)
         ret /= other
         return ret
 
-    def __idiv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+    def __itruediv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid /= self._verify_other(other)
         return self
 
-    def __pow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
-        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
-                            self.metric, self.consistency_check)
+    __rtruediv__ = __truediv__
+
+    def __pow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+        ret = copy.copy(self)
         ret **= other
         return ret
 
-    def __ipow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+    def __ipow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid **= self._verify_other(other)
         return self
 
@@ -743,13 +741,13 @@ class NumpyPatchGrid(_PatchSpace):
     def get_all_positions(self) -> Iterator[GridCoordinate]:
         for y in range(self.height):
             for x in range(self.width):
-                yield (x, y)"
+                yield (x, y)
 
     def __getitem__(self, pos: GridCoordinate) -> Content:
         return self._grid[self._verify_coord(pos)]
 
     def __setitem__(self, pos: GridCoordinate, content: Content) -> None:
-        pos = self._verify_coord(pos)
+        pos = cast(GridCoordinate, self._verify_coord(pos))
 
         if self.consistency_check is not None and self.consistency_check(self, pos, content):
             self._grid[pos] = content
@@ -757,9 +755,9 @@ class NumpyPatchGrid(_PatchSpace):
             raise ValueError("Cannot set value {} to position {}, failed consistency check {}".format(content, pos, self.consistency_check))
 
     def __delitem__(self, pos: GridCoordinate) -> None:
-        pos = self._verify_coord(pos)
+        pos = cast(GridCoordinate, self._verify_coord(pos))
 
-        if self.consistency_check is not None and self.consistency_check(self, pos, content):
+        if self.consistency_check is not None and self.consistency_check(self, pos, self.default_value):
             self._grid[pos] = self.default_value
         else:
             raise ValueError("Cannot delete value {} at position {}, failed consistency check {}".format(self._grid[pos], pos, self.consistency_check))
