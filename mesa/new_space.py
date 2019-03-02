@@ -9,6 +9,8 @@ from itertools import chain
 from math import pow, sqrt
 from inspect import stack
 import sys
+import collections
+import numpy as np
 
 Position = Any
 Content = Any
@@ -186,9 +188,9 @@ class _PatchSpace(_AbstractSpace):
     """
     @abstractmethod
     def __init__(self,
+                patch_name: str,
                 consistency_check: Callable[[_AbstractSpace, Position, Content], bool],
-                metric: Union[_Metric, Type[_Metric]],
-                patch_name: str) -> None:
+                metric: Union[_Metric, Type[_Metric]]) -> None:
         super().__init__(consistency_check, metric)
         """Include path_name because for e.g. pure numeric patches there isn't
         any other identifying information."""
@@ -484,7 +486,7 @@ class ChebyshevGridMetric(GridMetric):
                 yield (center[0]+x, center[1]+y)
 
 
-class GridConsistencyChecks:
+class ConsistencyChecks:
     warn_flag = False
 
     @staticmethod
@@ -504,20 +506,37 @@ class GridConsistencyChecks:
         return func_name
 
     @staticmethod
-    def max1(grid: 'Grid', coord: GridCoordinate, agent: Agent) -> bool:
+    def stack_checks(checks: Iterator[Callable[[_AbstractSpace, Position, Content], bool]]) -> Callable[[_AbstractSpace, Position, Content], bool]:
+        def _check_stacker(space: _AbstractSpace, pos: Position, content: Content):
+            for check in checks:
+                if check(space, pos, content):
+                    continue
+                return False
+
+        return _check_stacker
+
+
+
+class AgentConsistencyChecks(ConsistencyChecks):
+    @staticmethod
+    def max1(space: _AgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
         caller = GridConsistencyChecks._get_caller()
 
         if caller == "__setitem__":
-            return not len(grid[coord])
+            val = space[coord]
+            if isinstance(val, collections.Iterator):
+                return not len(list(val))
 
         return True
 
     @staticmethod
-    def unique(grid: 'Grid', coord: GridCoordinate, agent: Agent) -> bool:
+    def unique(space: _AgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
         caller = GridConsistencyChecks._get_caller()
 
         if caller == "__setitem__":
-            return type(agent) not in map(type, grid[coord])
+            val = space[coord]
+            if isinstance(val, collections.Iterator):
+                return type(agent) not in map(type, space[coord])
 
         return True
 
@@ -525,7 +544,7 @@ class GridConsistencyChecks:
 class Grid(_AgentSpace):
     def __init__(self,
                 width: int, height: int, torus: bool,
-                consistency_check: Callable[['Grid', GridCoordinate, Agent], bool] = GridConsistencyChecks.max1,
+                consistency_check: Callable[[_AgentSpace, GridCoordinate, Agent], bool] = GridConsistencyChecks.max1,
                 metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric):
         super().__init__(cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check), metric)
         self.width = width
@@ -600,3 +619,108 @@ class Grid(_AgentSpace):
         for y in range(self.height):
             for x in range(self.width):
                 yield (x, y)
+
+
+class NumpyPatchGrid(_PatchSpace):
+    def __init__(self,
+            patch_name: str, init_val: np.ndarray, torus: bool,
+            consistency_check: Callable[[_PatchSpace, GridCoordinate, Agent], bool] = PatchConsistencyChecks.gt0,
+            metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric):
+        super().__init__(patch_name, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check), metric)
+        self.torus = torus
+        if init_val.ndim != 2:
+            raise TypeError("NumericPatchGrid may only be initilialized with a ndarray of dimension 2")
+        self._grid = np.copy(init_val)
+        self.height, self.width = self._grid.shape
+
+    @abstractmethod
+    def __add__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+        ret = NumpyPatchGrid(self.patch_name, self._grid, self.torus,
+                            self.consistency_check, self.metric)
+        ret += other
+        return ret
+
+    @abstractmethod
+    def __iadd__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> -> 'NumpyPatchGrid':
+        if isinstance(other, NumpyPatchGrid) or isinstance(other, np.ndarray):
+            if isinstance(other, NumpyPatchGrid)
+                other_arr = other._grid
+            else:
+                other_arr = other
+
+            if self._grid.shape == other_arr.shape:
+                self._grid += other_arr
+            else:
+                raise TypeError("Incompatiable shape for passed grid, must be {}".format(self._grid.shape))
+        else:
+            self._grid += other
+
+        return self
+
+    @abstractmethod
+    def __radd__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+
+    @abstractmethod
+    def __sub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
+        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+
+    @abstractmethod
+    def __isub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+
+    @abstractmethod
+    def __rsub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+
+    @abstractmethod
+    def __mul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Element-by-element multiply values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __imul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Element-by-element multiplication of values of one _PatchSpace by
+        another _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __rmul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Element-by-element multiplication of values of one _PatchSpace by
+        another _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __div__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Element-by-element division of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __idiv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Element-by-element division of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __pow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Element-by-element power of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def __ipow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> None:
+        """Element-by-element power of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
+
+    @abstractmethod
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Content]]:
+        """Yield the agents in proximity to a position, possible including those
+        at the passed position."""
+
+    @abstractmethod
+    def value_at(self, pos: Position) -> Content:
+        """Yield the value at a given position."""
+
+    @abstractmethod
+    def step(self) -> None:
+        """_PatchSpace is like model in that it has a step method, and like a
+        BaseScheduler in that it has a self.steps that is incremented with each
+        call of step.
+        """
+        self.steps += 1
