@@ -86,6 +86,13 @@ class _AbstractSpace(ABC):
         """Return whether the space is continuous or discreet.  Discreet spaces
         are assumed to be finite, in addition."""
 
+    @property
+    @abstractmethod
+    def default_value(self) -> Content:
+        """Return whether the default value of the space.  For subclasses where
+        __missing__ is called (or are infinite) this should be the value that
+        intializes a point/cell/etc. such as set(), 0, None, etc."""
+
     @abstractmethod
     def __contains__(self, pos_or_content: Union[Position, Content]) -> bool:
         """Returns wether a *pos or content* is in the space."""
@@ -549,44 +556,46 @@ class Grid(_AgentSpace):
 
     @property
     def default_value(self) -> Set:
-        """Return the default value for empty cells."""
         return set()
 
     @property
     def is_continuous(self) -> bool:
         return False
 
-    def _translate_coord(self, pos: GridCoordinate) -> GridCoordinate:
-        return (pos[0] % self.width, pos[1] % self.height) if self.torus else pos
+    def _verify_coord(self, pos: GridCoordinate, raise_exception: bool = True) -> Optional[GridCoordinate]:
+        if 0 <= pos[0] <= self.width and 0 <= pos[1] < self.height:
+            return pos
+        elif self.torus:
+            return (pos[0] % self.width, pos[1] % self.height)
+        elif raise_exception:
+            raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+
+        return None
 
     def __getitem__(self, pos: GridCoordinate) -> set:
-        try:
-            return self._grid[self._translate_coord(pos)]
-        except KeyError:
-            return self.default_value
+        return self._grid.get(self._verify_coord(pos), self.default_value)
 
     def __setitem__(self, pos: GridCoordinate, agent: Agent) -> None:
-        pos = self._translate_coord(pos)
+        pos = self._verify_coord(pos)
 
-        if self.consistency_check is not None:
-            self.consistency_check(self, pos, agent)
-
-        try:
-            self._grid[pos].add(agent)
-        except KeyError:
-            self._grid[pos] = set([agent, ])
+        if self.consistency_check is not None and self.consistency_check(self, pos, agent):
+            try:
+                self._grid[pos].add(agent)
+            except KeyError:
+                self._grid[pos] = set([agent, ])
+        else:
+            raise ValueError("Cannot add agent {} to position {}, failed consistency check {}".format(agent, pos, self.consistency_check))
 
     def __delitem__(self, pos_or_content: Union[GridCoordinate, Agent]) -> None:
         if isinstance(pos_or_content, tuple):
-            pos = self._translate_coord(pos_or_content)
+            pos = self._verify_coord(pos_or_content)
             self._grid[pos].clear()
         else:
             self._grid[self._agent_to_pos[pos_or_content]].remove(pos_or_content)
 
     def __contains__(self, pos_or_content: Union[GridCoordinate, Agent]) -> bool:
         if isinstance(pos_or_content, tuple):
-            pos = self._translate_coord(pos_or_content)
-            return 0 <= pos[0] <= self.width and 0 <= pos[1] < self.height
+            return self._verify_coord(pos_or_content, False) is not None
         else:
             return pos_or_content in self._agent_to_pos
 
@@ -596,13 +605,11 @@ class Grid(_AgentSpace):
 
         raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
 
-    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
-        if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
-            for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius)):
-                if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
-                    yield n
-        else:
-            raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+    def neighborhood_at(self, pos: GridCoordinate, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
+        pos = self._verify_coord(pos)
+        for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius)):
+            if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
+                yield n
 
     def agents_at(self, pos: Position) -> Iterator[Agent]:
         return iter(self[pos])
@@ -713,6 +720,49 @@ class NumpyPatchGrid(_PatchSpace):
     def __ipow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> '_PatchSpace':
         self._grid **= self._verify_other(other)
         return self
+
+    @property
+    def is_continuous(self) -> bool:
+        return False
+
+    # ####Exactly the same as Grid!!!!
+    def _verify_coord(self, pos: GridCoordinate, raise_exception: bool = True) -> Optional[GridCoordinate]:
+        if 0 <= pos[0] <= self.width and 0 <= pos[1] < self.height:
+            return pos
+        elif self.torus:
+            return (pos[0] % self.width, pos[1] % self.height)
+        elif raise_exception:
+            raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+
+        return None
+
+    def __contains__(self, pos: GridCoordinate) -> bool:
+        return self._verify_coord(pos, False) is not None
+
+    # ####Exactly the same as Grid!!!!
+    def get_all_positions(self) -> Iterator[GridCoordinate]:
+        for y in range(self.height):
+            for x in range(self.width):
+                yield (x, y)"
+
+    def __getitem__(self, pos: GridCoordinate) -> Content:
+        return self._grid[self._verify_coord(pos)]
+
+    def __setitem__(self, pos: GridCoordinate, content: Content) -> None:
+        pos = self._verify_coord(pos)
+
+        if self.consistency_check is not None and self.consistency_check(self, pos, content):
+            self._grid[pos] = content
+        else:
+            raise ValueError("Cannot set value {} to position {}, failed consistency check {}".format(content, pos, self.consistency_check))
+
+    def __delitem__(self, pos: GridCoordinate) -> None:
+        pos = self._verify_coord(pos)
+
+        if self.consistency_check is not None and self.consistency_check(self, pos, content):
+            self._grid[pos] = self.default_value
+        else:
+            raise ValueError("Cannot delete value {} at position {}, failed consistency check {}".format(self._grid[pos], pos, self.consistency_check))
 
     # ####Exactly the same as Grid!!!!
     def neighborhood_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
