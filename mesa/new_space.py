@@ -42,17 +42,17 @@ class _Metric(ABC):
     """
     @classmethod
     @abstractmethod
-    def distance(cls, pos1: Position, pos2: Position) -> Distance:
+    def distance(cls, pos1: Position, pos2: Position, space: '_AbstractSpace') -> Distance:
         """Returns the distance (real) bewteen two positions"""
 
     @classmethod
     @abstractmethod
-    def path_length(cls, path: Iterator[Position]) -> Distance:
+    def path_length(cls, path: Iterator[Position], space: '_AbstractSpace') -> Distance:
         """Returns the distance (real) along a given path/iterator of positions"""
 
     @classmethod
     @abstractmethod
-    def neighborhood(cls, center: Position, radius: Distance) -> Union[Iterator[Position], '_AbstractSpace']:
+    def neighborhood(cls, center: Position, radius: Distance, space: '_AbstractSpace') -> Union[Iterator[Position], '_AbstractSpace']:
         """Returns the neighborhood of a point with the given radius.  Returns an
         iterator of Position's if a discreet space, or a (sub)_AbstractSpace if
         continuous."""
@@ -60,15 +60,15 @@ class _Metric(ABC):
 
 class _NullMetric(_Metric):
     @classmethod
-    def distance(cls, pos1: Position, pos2: Position) -> Distance:
+    def distance(cls, pos1: Position, pos2: Position, space: '_AbstractSpace') -> Distance:
         return 0
 
     @classmethod
-    def path_length(cls, path: Iterator[Position]) -> Distance:
+    def path_length(cls, path: Iterator[Position], space: '_AbstractSpace') -> Distance:
         return 0
 
     @classmethod
-    def neighborhood(cls, center: Position, radius: Distance) -> Union[Iterator[Position], '_AbstractSpace']:
+    def neighborhood(cls, center: Position, radius: Distance, space: '_AbstractSpace') -> Union[Iterator[Position], '_AbstractSpace']:
         return iter([])
 
 
@@ -439,23 +439,49 @@ class LayeredSpace(_AgentSpace):
 
 class GridMetric(_Metric):
     @classmethod
-    def path_length(cls, path: Iterator[Position]) -> Distance:
+    @abstractmethod
+    def distance(cls, pos1: GridCoordinate, pos2: GridCoordinate, space: _AbstractSpace) -> Distance:
+        if pos1 not in space:
+            raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
+        if pos2 not in space:
+            raise LookupError("path_length failed because '{}' is not in space {}".format(pos2, space))
+
+        return 0
+
+    @classmethod
+    def path_length(cls, path: Iterator[GridCoordinate], space: _AbstractSpace) -> Distance:
         ret: Distance = 0
         pos1: Position = next(path)
+        if pos1 not in space:
+            raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
         for pos2 in path:
+            if pos1 not in space:
+                raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
             ret += cls.distance(pos1, pos2)
             pos1 = pos2
 
         return ret
 
+    @classmethod
+    @abstractmethod
+    def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace) -> Iterator[GridCoordinate]:
+        if center not in space:
+            raise LookupError("path_length failed because '{}' is not in space {}".format(center, space))
+
+        return iter([])
+
 
 class EuclidianGridMetric(GridMetric):
     @classmethod
-    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate) -> Distance:
+    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
+        super(EuclidianGridMetric, cls).distance(coord1, coord2, space)
+
         return sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2)
 
     @classmethod
-    def neighborhood(cls, center: GridCoordinate, radius: Distance) -> Iterator[GridCoordinate]:
+    def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace) -> Iterator[GridCoordinate]:
+        super(EuclidianGridMetric, cls).neighborhood(center, radius, space)
+
         # This is ugly and inefficient, but this will grind out the needed result
         for y in range(-int(radius), int(radius)+1):
             for x in range(-int(radius), int(radius)+1):
@@ -465,11 +491,15 @@ class EuclidianGridMetric(GridMetric):
 
 class ManhattanGridMetric(GridMetric):
     @classmethod
-    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate) -> Distance:
+    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
+        super(ManhattanGridMetric, cls).distance(coord1, coord2, space)
+
         return abs(coord1[0]-coord2[0]) + abs((coord1[1]-coord2[1]))
 
     @classmethod
-    def neighborhood(cls, center: GridCoordinate, radius: Distance) -> Iterator[Position]:
+    def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace) -> Iterator[Position]:
+        super(ManhattanGridMetric, cls).neighborhood(center, radius, space)
+
         for y in range(-int(radius), int(radius)+1):
             for x in range(abs(y)-int(radius), int(radius)-abs(y)+1):
                 yield (center[0]+x, center[1]+y)
@@ -477,11 +507,15 @@ class ManhattanGridMetric(GridMetric):
 
 class ChebyshevGridMetric(GridMetric):
     @classmethod
-    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate) -> Distance:
+    def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
+        super(ChebyshevGridMetric, cls).distance(coord1, coord2, space)
+
         return max(abs(coord1[0]-coord2[0]), abs((coord1[1]-coord2[1])))
 
     @classmethod
-    def neighborhood(cls, center: GridCoordinate, radius: Distance) -> Iterator[Position]:
+    def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace) -> Iterator[Position]:
+        super(ChebyshevGridMetric, cls).neighborhood(center, radius, space)
+
         for y in range(-int(radius), int(radius)+1):
             for x in range(-int(radius), int(radius)+1):
                 yield (center[0]+x, center[1]+y)
@@ -608,9 +642,8 @@ class Grid(_AgentSpace):
 
     def neighborhood_at(self, pos: GridCoordinate, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
         pos = cast(GridCoordinate, self._verify_coord(pos))
-        for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius)):
-            if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
-                yield n
+        for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius, self)):
+            yield n
 
     def agents_at(self, pos: Position) -> Iterator[Agent]:
         return iter(self[pos])
