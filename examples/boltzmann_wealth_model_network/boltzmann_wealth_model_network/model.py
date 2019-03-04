@@ -3,7 +3,7 @@ from mesa.time import RandomActivation
 from mesa.datacollection import DataCollector
 import networkx as nx
 
-from mesa.space import NetworkGrid
+from mesa.new_space import NetworkX
 
 
 def compute_gini(model):
@@ -22,7 +22,7 @@ class BoltzmannWealthModelNetwork(Model):
         self.num_agents = num_agents
         self.num_nodes = num_nodes if num_nodes >= self.num_agents else self.num_agents
         self.G = nx.erdos_renyi_graph(n=self.num_nodes, p=0.5)
-        self.grid = NetworkGrid(self.G)
+        self.grid = NetworkX(self.G)
         self.schedule = RandomActivation(self)
         self.datacollector = DataCollector(
             model_reporters={"Gini": compute_gini},
@@ -36,7 +36,7 @@ class BoltzmannWealthModelNetwork(Model):
             a = MoneyAgent(i, self)
             self.schedule.add(a)
             # Add the agent to a random node
-            self.grid.place_agent(a, list_of_random_nodes[i])
+            self.grid.place_agent(list_of_random_nodes[i], a)
 
         self.running = True
         self.datacollector.collect(self)
@@ -59,16 +59,14 @@ class MoneyAgent(Agent):
         self.wealth = 1
 
     def move(self):
-        possible_steps = [node for node in self.model.grid.get_neighbors(self.pos, include_center=False) if
-                          self.model.grid.is_cell_empty(node)]
+        possible_steps = [node for node in self.model.grid.neighborhood_of(self, include_center=False) if
+                          not self.model.grid.count_agents_at(node)]
         if len(possible_steps) > 0:
             new_position = self.random.choice(possible_steps)
-            self.model.grid.move_agent(self, new_position)
+            self.model.grid.move_agent(new_position, self)
 
     def give_money(self):
-
-        neighbors_nodes = self.model.grid.get_neighbors(self.pos, include_center=False)
-        neighbors = self.model.grid.get_cell_list_contents(neighbors_nodes)
+        neighbors = [a for pos, a in self.model.grid.neighbors_of(self, include_center=False)]
         if len(neighbors) > 0:
             other = self.random.choice(neighbors)
             other.wealth += 1
