@@ -437,10 +437,10 @@ class LayeredSpace(_AgentSpace):
         return cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_own)
 
 
-class GridMetric(_Metric):
+class BasicMetric(_Metric):
     @classmethod
     @abstractmethod
-    def distance(cls, pos1: GridCoordinate, pos2: GridCoordinate, space: _AbstractSpace) -> Distance:
+    def distance(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Distance:
         if pos1 not in space:
             raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
         if pos2 not in space:
@@ -449,7 +449,7 @@ class GridMetric(_Metric):
         return 0
 
     @classmethod
-    def path_length(cls, path: Iterator[GridCoordinate], space: _AbstractSpace) -> Distance:
+    def path_length(cls, path: Iterator[Position], space: _AbstractSpace) -> Distance:
         ret: Distance = 0
         pos1: Position = next(path)
         if pos1 not in space:
@@ -457,21 +457,21 @@ class GridMetric(_Metric):
         for pos2 in path:
             if pos1 not in space:
                 raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
-            ret += cls.distance(pos1, pos2)
+            ret += cls.distance(pos1, pos2, space)
             pos1 = pos2
 
         return ret
 
     @classmethod
     @abstractmethod
-    def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace) -> Iterator[GridCoordinate]:
+    def neighborhood(cls, center: Position, radius: Distance, space: _AbstractSpace) -> Iterator[GridCoordinate]:
         if center not in space:
             raise LookupError("path_length failed because '{}' is not in space {}".format(center, space))
 
         return iter([])
 
 
-class EuclidianGridMetric(GridMetric):
+class EuclidianGridMetric(BasicMetric):
     @classmethod
     def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
         super(EuclidianGridMetric, cls).distance(coord1, coord2, space)
@@ -485,11 +485,11 @@ class EuclidianGridMetric(GridMetric):
         # This is ugly and inefficient, but this will grind out the needed result
         for y in range(-int(radius), int(radius)+1):
             for x in range(-int(radius), int(radius)+1):
-                if cls.distance((0, 0), (x, y)) <= radius:
+                if cls.distance((0, 0), (x, y), space) <= radius:
                     yield (center[0]+x, center[1]+y)
 
 
-class ManhattanGridMetric(GridMetric):
+class ManhattanGridMetric(BasicMetric):
     @classmethod
     def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
         super(ManhattanGridMetric, cls).distance(coord1, coord2, space)
@@ -505,7 +505,7 @@ class ManhattanGridMetric(GridMetric):
                 yield (center[0]+x, center[1]+y)
 
 
-class ChebyshevGridMetric(GridMetric):
+class ChebyshevGridMetric(BasicMetric):
     @classmethod
     def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
         super(ChebyshevGridMetric, cls).distance(coord1, coord2, space)
@@ -655,6 +655,47 @@ class Grid(_AgentSpace):
         for y in range(self.height):
             for x in range(self.width):
                 yield (x, y)
+
+
+class Graph:
+  def __init__(self):
+    self.nodes: Set[Content] = set()
+    self.edges: Dict[Content, Set[Content]] = defaultdict(set)
+    self._distances = {}
+
+  def add_node(self, content: Content):
+    self.nodes.add(content)
+
+  def add_edge(self, from_node: Content, to_node: Content, distance: Distance):
+    self.edges[from_node].append(to_node)
+    self.edges[to_node].append(from_node)
+    self.distances[(from_node, to_node)] = distanc
+
+
+class NetworkMetric(BasicMetric):
+    @classmethod
+    def distance(cls, node1: Position, node2: Position, space: _AbstractSpace) -> Distance:
+        super(NetworkMetric, cls).distance(node1, node2, space)
+
+
+
+    @classmethod
+    def neighborhood(cls, root: Position, radius: Distance, space: _AbstractSpace) -> Iterator[Position]:
+        super(NetworkMetric, cls).neighborhood(root, radius, space)
+
+
+
+
+class Network(_AgentSpace):
+    def __init__(self,
+                graph: Graph,
+                metric: Union[_Metric, Type[_Metric]] = NetworkMetric,
+                consistency_check: Callable[[_AgentSpace, Position, Agent], bool] = AgentConsistencyChecks.max1):
+        super().__init__(metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
+        self.width = width
+        self.height = height
+        self.torus = torus
+        self._grid: Dict[GridCoordinate, Set] = dict()
 
 
 class PatchConsistencyChecks(ConsistencyChecks):
