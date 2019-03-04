@@ -12,6 +12,7 @@ import sys
 import collections
 import numpy as np
 import copy
+import networkx as nx
 
 Position = Any
 Content = Any
@@ -657,45 +658,43 @@ class Grid(_AgentSpace):
                 yield (x, y)
 
 
-class Graph:
-  def __init__(self):
-    self.nodes: Set[Content] = set()
-    self.edges: Dict[Content, Set[Content]] = defaultdict(set)
-    self._distances = {}
-
-  def add_node(self, content: Content):
-    self.nodes.add(content)
-
-  def add_edge(self, from_node: Content, to_node: Content, distance: Distance):
-    self.edges[from_node].append(to_node)
-    self.edges[to_node].append(from_node)
-    self.distances[(from_node, to_node)] = distanc
-
-
-class NetworkMetric(BasicMetric):
+class NetworkXMetric(BasicMetric):
     @classmethod
     def distance(cls, node1: Position, node2: Position, space: _AbstractSpace) -> Distance:
         super(NetworkMetric, cls).distance(node1, node2, space)
 
-
+        nx.shortest_path(space._graph, source=node1, target=node2, "distance")
 
     @classmethod
     def neighborhood(cls, root: Position, radius: Distance, space: _AbstractSpace) -> Iterator[Position]:
         super(NetworkMetric, cls).neighborhood(root, radius, space)
 
+        space._graph.adj(root)
 
 
 
-class Network(_AgentSpace):
+class NetworkX(_AgentSpace):
     def __init__(self,
-                graph: Graph,
-                metric: Union[_Metric, Type[_Metric]] = NetworkMetric,
+                graph: Optional[nx.Graph] = None,
+                metric: Union[_Metric, Type[_Metric]] = NetworkXMetric,
                 consistency_check: Callable[[_AgentSpace, Position, Agent], bool] = AgentConsistencyChecks.max1):
         super().__init__(metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
-        self.width = width
-        self.height = height
-        self.torus = torus
-        self._grid: Dict[GridCoordinate, Set] = dict()
+        if graph is None:
+            self._graph = nx.Graph()
+        else:
+            NetworkX._verify_entire_graph(graph)
+            self._graph = copy(graph)
+
+    @staticmethod
+    def _verify_entire_graph(graph: nx.Graph) -> None:
+        for pos, attrs in graph.nodes(data="agents"):
+            if not isinstance(attrs["agents"], set):
+                raise TypeError("All nodes of passed graph must be of type set; found {}".format(node))
+            for a in attrs["agents"]:
+                if not isinstance(a, Agent):
+                    raise TypeError("All contens of NetworkX nodes must be of type Agent; found {}".format(a))
+
+
 
 
 class PatchConsistencyChecks(ConsistencyChecks):
