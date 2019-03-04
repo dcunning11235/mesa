@@ -13,6 +13,7 @@ import collections
 import numpy as np
 import copy
 import networkx as nx
+from networkx.generators.ego import ego_graph
 
 Position = Any
 Content = Any
@@ -148,15 +149,11 @@ class _AgentSpace(_AbstractSpace):
 
     def place_agent(self, pos: Position, agent: Agent) -> None:
         """Place an agent at a specific position."""
-        # The order of ops here matters!
-        self._agent_to_pos[agent] = pos
         self[pos] = agent
 
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
-        # The order of ops here matters!
         del self[agent]
-        pos = self._agent_to_pos.pop(agent)
 
     def move_agent(self, pos: Position, agent: Agent) -> None:
         """Move an agent from its current to a new position."""
@@ -176,10 +173,10 @@ class _AgentSpace(_AbstractSpace):
         """Returns all agents within the space."""
         return iter(self._agent_to_pos.keys())
 
-    def agents_at(self, pos: Position) -> Iterator[Agent]:
+    def agents_at(self, pos: Position, include_own: bool = True) -> Iterator[Agent]:
         """Yield the neighbors at a given position (i.e. neighnors_at, but with
         radius=0)."""
-        return map(lambda tup: tup[1], self.neighbors_at(pos, 0, False))
+        return map(lambda tup: tup[1], self.neighbors_at(pos, 0, include_own))
 
     def neighbors_of(self, agent: Agent, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the agents that are the neighbors of a given agent, including
@@ -405,18 +402,18 @@ class LayeredSpace(_AgentSpace):
                 mapping has been removed.".format(agent, self._agent_to_layer[agent]))
         del self._agent_to_layer[agent]
 
-    def agents_at(self, pos: Union[Position, LayeredPosition]) -> Iterator[Agent]:
+    def agents_at(self, pos: Union[Position, LayeredPosition], include_own: bool = True) -> Iterator[Agent]:
         """Yield the agents at a specific position within a specific layer if
         the passed `pos` is of type `LayeredPosition`, else yield the agents at
         the passed `Position` for all layers"""
         if isinstance(pos, LayeredPosition):
             if isinstance(self.layers[pos.layer], _AgentSpace):
-                return cast(_AgentSpace, self.layers[pos.layer]).agents_at(pos.pos)
+                return cast(_AgentSpace, self.layers[pos.layer]).agents_at(pos.pos, include_own)
             else:
                 raise TypeError("Cannot return agents from layer '{}', it is not \
                     an instance of _AgentSpace.".format(pos.layer))
         else:
-            return chain(*[l.agents_at(pos) for l in self.layers.values() if isinstance(l, _AgentSpace)])
+            return chain(*[l.agents_at(pos, include_own) for l in self.layers.values() if isinstance(l, _AgentSpace)])
 
     def neighbors_at(self, pos: Union[Position, LayeredPosition], radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the agents in proximity to a position."""
@@ -617,17 +614,22 @@ class Grid(_AgentSpace):
         if self.consistency_check is not None and self.consistency_check(self, pos, agent):
             try:
                 self._grid[pos].add(agent)
+                self._agent_to_pos[agent] = pos
             except KeyError:
                 self._grid[pos] = set([agent, ])
+                self._agent_to_pos[agent] = pos
         else:
             raise ValueError("Cannot add agent {} to position {}, failed consistency check {}".format(agent, pos, self.consistency_check))
 
     def __delitem__(self, pos_or_content: Union[GridCoordinate, Agent]) -> None:
         if isinstance(pos_or_content, tuple):
             pos = cast(GridCoordinate, self._verify_coord(pos))
+            for a in self._grid[pos]:
+                del self._agent_to_pos[a]
             self._grid[pos].clear()
         else:
             self._grid[self._agent_to_pos[pos_or_content]].remove(pos_or_content)
+            del self._agent_to_pos[pos_or_content]
 
     def __contains__(self, pos_or_content: Union[GridCoordinate, Agent]) -> bool:
         if isinstance(pos_or_content, tuple):
@@ -643,14 +645,24 @@ class Grid(_AgentSpace):
 
     def neighborhood_at(self, pos: GridCoordinate, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
         pos = cast(GridCoordinate, self._verify_coord(pos))
-        for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius, self)):
-            yield n
+        it = cast(Iterator[GridCoordinate], self.metric.neighborhood(pos, radius, self))
+        if include_own:
+            return it
+        else:
+            for n in it:
+                if n != pos:
+                    yield n
 
-    def agents_at(self, pos: Position) -> Iterator[Agent]:
-        return iter(self[pos])
+    def agents_at(self, pos: Position, include_own: bool = True) -> Iterator[Agent]:
+        if include_own:
+            return iter(self[pos])
+        else:
+            for a in self[pos]:
+                if a != self:
+                    yield a
 
     def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[GridCoordinate, Agent]]:
-        return chain(*[map(lambda a: (pos, a), self.agents_at(pos)) for n in self.neighborhood_at(pos, radius, include_own)])
+        return chain(*[map(lambda a: (pos, a), self.agents_at(pos, include_own)) for n in self.neighborhood_at(pos, radius)])
 
     def get_all_positions(self) -> Iterator[Position]:
         for y in range(self.height):
@@ -661,16 +673,15 @@ class Grid(_AgentSpace):
 class NetworkXMetric(BasicMetric):
     @classmethod
     def distance(cls, node1: Position, node2: Position, space: _AbstractSpace) -> Distance:
-        super(NetworkMetric, cls).distance(node1, node2, space)
+        super(NetworkXMetric, cls).distance(node1, node2, space)
 
-        nx.shortest_path(space._graph, source=node1, target=node2, "distance")
+        return nx.shortest_path_length(cast('NetworkX', space)._graph, node1, node2, weight="distance")
 
     @classmethod
     def neighborhood(cls, root: Position, radius: Distance, space: _AbstractSpace) -> Iterator[Position]:
-        super(NetworkMetric, cls).neighborhood(root, radius, space)
+        super(NetworkXMetric, cls).neighborhood(root, radius, space)
 
-        space._graph.adj(root)
-
+        return ego_graph(cast('NetworkX', space)._graph, root, radius, distance="distance").nodes
 
 
 class NetworkX(_AgentSpace):
@@ -683,18 +694,80 @@ class NetworkX(_AgentSpace):
             self._graph = nx.Graph()
         else:
             NetworkX._verify_entire_graph(graph)
-            self._graph = copy(graph)
+            self._graph = copy.copy(graph)
 
     @staticmethod
     def _verify_entire_graph(graph: nx.Graph) -> None:
         for pos, attrs in graph.nodes(data="agents"):
             if not isinstance(attrs["agents"], set):
-                raise TypeError("All nodes of passed graph must be of type set; found {}".format(node))
+                raise TypeError("All nodes of passed graph must be of type set; found value {} of type {}".format(attrs["agents"], type(attrs["agents"])))
             for a in attrs["agents"]:
                 if not isinstance(a, Agent):
                     raise TypeError("All contens of NetworkX nodes must be of type Agent; found {}".format(a))
 
+    @property
+    def is_continuous(self) -> bool:
+        return False
 
+    @property
+    def default_value(self) -> Content:
+        return set()
+
+    def __contains__(self, pos_or_content: Union[Position, Content]) -> bool:
+        if isinstance(pos_or_content, Agent):
+            return pos_or_content in self._agent_to_pos
+        else:
+            return pos_or_content in self._graph
+
+    def get_all_positions(self) -> Iterator[Position]:
+        return self._graph.nodes
+
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Union[Iterator[Position], '_AbstractSpace']:
+        if pos not in self._graph:
+            raise LookupError("'{}' is not part of the network graph".format(pos))
+
+        it = cast(Iterator[Position], self.metric.neighborhood(pos, radius, self))
+        if include_own:
+            return it
+        else:
+            for n in it:
+                if n != pos:
+                    yield n
+
+    def agents_at(self, pos: Position, include_own: bool = True) -> Iterator[Agent]:
+        if include_own:
+            return iter(self[pos])
+        else:
+            for a in self[pos]:
+                if a != self:
+                    yield a
+
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[Tuple[Position, Content]]:
+        return chain(*[map(lambda a: (pos, a), self.agents_at(pos, include_own)) for n in cast(Iterator[Any], self.neighborhood_at(pos, radius))])
+
+    def __getitem__(self, pos: Position) -> Union[Iterator[Content], Content]:
+        return iter(self._graph[pos]["agents"])
+
+    def __setitem__(self, pos: Position, agent: Agent) -> None:
+        if pos not in self._graph:
+            raise LookupError("'{}' is not part of the network graph".format(pos))
+
+        self._graph[pos]["agents"].add(agent)
+        self._agent_to_pos[agent] = pos
+
+    def __delitem__(self, pos_or_content: Union[Position, Agent]) -> None:
+        if pos_or_content not in self:
+            raise LookupError("'{}' is not part of the network graph".format(pos_or_content))
+
+        if isinstance(pos_or_content, Agent):
+            self._graph[self.find_agent(pos_or_content)]["agents"].remove(pos_or_content)
+        else:
+            for a in self._graph[pos_or_content]["agents"]:
+                del self._agent_to_pos[a]
+            self._graph[pos_or_content]["agents"] = self.default_value
+
+    def __missing__(self, pos: Position) -> Content:
+        raise LookupError("'{}' is not part of the network graph".format(pos))
 
 
 class PatchConsistencyChecks(ConsistencyChecks):
@@ -838,7 +911,7 @@ class NumpyPatchGrid(_PatchSpace):
     # ####Exactly the same as Grid!!!!
     def neighborhood_at(self, pos: Position, radius: Distance = 1, include_own: bool = True) -> Iterator[GridCoordinate]:
         if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
-            for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius)):
+            for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius, self)):
                 if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
                     yield n
         else:
