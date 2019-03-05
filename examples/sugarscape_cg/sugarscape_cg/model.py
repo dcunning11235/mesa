@@ -10,11 +10,13 @@ Northwestern University, Evanston, IL.
 '''
 
 from mesa import Model
-from mesa.space import MultiGrid
+from mesa.new_space import Grid, LayeredSpace, NumpyPatchGrid
+from mesa.time import RandomActivation
 from mesa.datacollection import DataCollector
+import numpy as np
 
-from .agents import SsAgent, Sugar
-from .schedule import RandomActivationByBreed
+from .agents import SsAgent
+
 
 
 class SugarscapeCg(Model):
@@ -38,12 +40,12 @@ class SugarscapeCg(Model):
         self.width = width
         self.initial_population = initial_population
 
-        self.schedule = RandomActivationByBreed(self)
-        self.grid = MultiGrid(self.height, self.width, torus=False)
+        self.schedule = RandomActivation(self)
+        self.grid = LayeredSpace({"agents": Grid(self.height, self.width, torus=False),
+                                "sugar": NumpyPatchGrid(np.ones((self.height, self.width), int), torus=False)})
         self.datacollector = DataCollector({"SsAgent": lambda m: m.schedule.get_breed_count(SsAgent), })
 
         # Create sugar
-        import numpy as np
         sugar_distribution = np.genfromtxt("sugarscape_cg/sugar-map.txt")
         for _, x, y in self.grid.coord_iter():
             max_sugar = sugar_distribution[x, y]

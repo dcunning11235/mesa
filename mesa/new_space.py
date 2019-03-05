@@ -201,13 +201,9 @@ class _PatchSpace(_AbstractSpace):
     """
     @abstractmethod
     def __init__(self,
-                patch_name: str,
                 metric: Union[_Metric, Type[_Metric]],
                 consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None) -> None:
         super().__init__(metric, consistency_check)
-        """Include path_name because for e.g. pure numeric patches there isn't
-        any other identifying information."""
-        self.patch_name = patch_name
         self.steps = 0
 
     @abstractmethod
@@ -776,15 +772,32 @@ class NetworkX(_AgentSpace):
         raise LookupError("'{}' is not part of the network graph".format(pos))
 
 
-class PatchConsistencyChecks(ConsistencyChecks):
+class NumpyPatchConsistencyChecks(ConsistencyChecks):
     @staticmethod
-    def gte0(space: _PatchSpace, coord: GridCoordinate, value: Content) -> bool:
-        caller = ConsistencyChecks._get_caller()
+    def gteq0(space: '_NumpyPatchSpace', coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool. np.ndarray]:
+        if coord is None:
+            return space._grid >= 0
 
+        caller = ConsistencyChecks._get_caller()
         if caller == "__setitem__":
-            return value >=0
+            return value >= 0
 
         return True
+
+    @staticmethod
+    def get_arbitrary_max(max_vals: np.ndarray) -> Callable[['_NumpyPatchSpace', coord: Optional[GridCoordinate], value: Optional[Content]], Union[bool. np.ndarray]]:
+        class _arbitrary_max:
+            def __init__(self, max_vals: np.ndarray):
+                self.max_vals = max_vals
+
+            def lteq_arb(space: '_NumpyPatchSpace', coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool. np.ndarray]:
+                if coord is None:
+                    return space._grid <= self.max_vals
+
+                caller = ConsistencyChecks._get_caller()
+                print("lteq_arb got caller: {}".format(caller))
+                if caller == "__setitem__":
+                    return value <= self.max_vals[coord]
 
 # An altrnative path would be to have NumpyPatchGrid actually extend numpy.ndarray
 # but I have some doubts. E.g. implementing consistency checks would require wrapping
@@ -794,10 +807,10 @@ class PatchConsistencyChecks(ConsistencyChecks):
 # neat if we just extended it...
 class NumpyPatchGrid(_PatchSpace):
     def __init__(self,
-            patch_name: str, init_val: np.ndarray, torus: bool,
+            init_val: np.ndarray, torus: bool,
             metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric,
-            consistency_check: Callable[[_PatchSpace, GridCoordinate, Agent], bool] = PatchConsistencyChecks.gte0):
-        super().__init__(patch_name, metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
+            consistency_check: Callable[[_NumpyPatchSpace, coord: Optional[GridCoordinate], value: Optional[Content]], Union[bool. np.ndarray]] = NumpyPatchConsistencyChecks.gteq0):
+        super().__init__(metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
         self.torus = torus
         if init_val.ndim != 2:
             raise TypeError("NumericPatchGrid may only be initilialized with a ndarray of dimension 2")
