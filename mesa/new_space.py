@@ -73,7 +73,14 @@ class _NullMetric(_Metric):
     def neighborhood(cls, center: Position, radius: Distance, space: '_AbstractSpace', include_center: bool = True) -> Union[Iterator[Position], '_AbstractSpace']:
         return iter([])
 
-
+# I think I really need to step back here and think about the idea of a network vs
+# a space.  A network of agents is actually a very different thing than a network
+# or grid or "space" of positons that Agents may (or may not) occupy, singularly
+# or in multiple.  Treating Agents as (potential) Positions just about solves this,
+# but I think there there may in fact be plenty here to have to trunks of a class
+# hierarchy, an _AgentNetwork and an _AgentSpace trunk, each of which share a
+# fairly minimal base class (__contain__, neighborhood_at, and possibly all of
+# __get/set/delitem__).  I need to think about this more tomorrow.
 class _AbstractSpace(ABC):
     @abstractmethod
     def __init__(self,
@@ -111,6 +118,7 @@ class _AbstractSpace(ABC):
         positions or an _AbstractSpace containing only the subspace of the
         neighborhood."""
 
+    # This would not exist on a social network of Agents
     @abstractmethod
     def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Content]]:
         """Yield the neighbors in proximity to a position, possible including those
@@ -147,6 +155,7 @@ class _AgentSpace(_AbstractSpace):
         super().__init__(metric, consistency_check)
         self._agent_to_pos: Dict[Agent, Position] = {}
 
+    # This would not exist on a social network of Agents
     def place_agent(self, pos: Position, agent: Agent) -> None:
         """Place an agent at a specific position."""
         self[pos] = agent
@@ -155,11 +164,13 @@ class _AgentSpace(_AbstractSpace):
         """Remove an agent from the space."""
         del self[agent]
 
+    # This would not exist on a social network of Agents
     def move_agent(self, pos: Position, agent: Agent) -> None:
         """Move an agent from its current to a new position."""
         self.remove_agent(agent)
         self.place_agent(pos, agent)
 
+    # ##DELETE
     def agent_exists(self, agent: Agent) -> bool:
         """Return if an agent exists within the space."""
         return agent in self._agent_to_pos
@@ -173,16 +184,19 @@ class _AgentSpace(_AbstractSpace):
         """Returns all agents within the space."""
         return iter(self._agent_to_pos.keys())
 
+    # This would not exist on a social network of Agents
     def agents_at(self, pos: Position) -> Iterator[Agent]:
         """Yield the neighbors at a given position (i.e. neighnors_at, but with
         radius=0)."""
         return map(lambda tup: tup[1], self.neighbors_at(pos, 0, True))
 
+    # This would not exist on a social network of Agents
     def count_agents_at(self, pos: Position) -> int:
         """Yield the neighbors at a given position (i.e. neighnors_at, but with
         radius=0)."""
         return len(list(self.neighbors_at(pos, 0, True)))
 
+    # This would not exist on a social network of Agents
     def neighbors_of(self, agent: Agent, radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the agents that are the neighbors of a given agent, including
         itself possibly."""
