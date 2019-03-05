@@ -309,27 +309,27 @@ class _SocialAgentSpace(_SocialSpace):
                 consistency_check: Callable[['_SocialSpace', Content], bool] = None) -> None:
         super().__init__(metric, consistency_check)
 
-# Do _PatchSpaces **HAVE** to 'shadow' some other space?
+
 class _PatchSpace(_AbstractSpace):
     """_PatchSpace holds simple values, or wraps objects that present a simple
     value, which can be +,-,*,/, or ** together or with a scalar.  A `step`
     method is also included so that the _PatchSpace iself can be e.g. added to a
     scheduler.
+
+    _PatchSpaces do not exist 'on their own'.  They are instantiated based on
+    another space, from which they take their metric and other properties
+    (dimensions, indexing, etc.)
+
+    Subclasses must e.g. implement how they are initialized, etc.
     """
     @abstractmethod
     def __init__(self,
-                metric: Union[_Metric, Type[_Metric]],
+                base_space: _AbstractSpace,
                 consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None) -> None:
-        super().__init__(metric, consistency_check)
+        super().__init__(base_space.metric)
+        self.base_space = base_space
+        self.consistency_check = consistency_check
         self.steps = 0
-
-    @abstractmethod
-    @staticmethod
-    def mimic(main_space: _AbstractSpace,
-            consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None) -> '_PatchSpace':
-        """Factory method for creating _PatchSpace that copies e.g. _Metric (and
-        probably type, size, etc.) from some other, exiting space.  E.g. you have
-        a grid of Agents and want a _PatchSpace to match."""
 
     @abstractmethod
     def __add__(self, other: Any) -> '_PatchSpace':
@@ -448,15 +448,33 @@ class _PatchSpace(_AbstractSpace):
 # Relies on __getitem__  on _AbstractSpace implementations not throwing
 # KeyError's but returning defaults, BUT ALSO doing their own bounds
 # checking and throwing errors appropriately.
-class LayeredSpace(_AgentSpace):
+#
+# How to layer spaces that rely on different topologies.  E.g. a Grid full of
+# farmers, a grid of merchants, a couple of corresponging GridPatchSpace's, and...
+# a SocialNetwork of cities.  We can force the network type.  That is easy
+# solution, so that it isn't a SocialNetwork at all but a PositionalNetwork.
+# Otherwise, need some kind of mapping, where CityAgent "Wheatopia" maps to (7,1)
+# and CityAgent "Cornucopia" maps to (35,122)... But at that point... doesn't it
+# just make sense to change the type of the CityAgents' network?  I suppose it
+# could be a case of, "Yeah, but it was already done this way, we don't want to."
+#
+# Have to think more on this.
+#
+# Possible solutions:
+# (1) Force the re-implementation to PositionalNetwork
+# (2) Include some kind of lookup/mapper as part of or utility class passed to
+#     LayeredSpace
+# (3) Include a wrapper, e.g. a "NetworkToPositional" wrapper that "converts" the
+#     class (and would include a tranlsator... but not as part of LayeredSpace.)
+#
+class LayeredSpace(_AbstractSpace):
     """
-    LayeredSpace is a composite of _AbstractSpace's, each named.  Adding an
-    _AgentSpace to a LayeredSpace causes its __setitem__, __delitem__,
-    place_agent, and remove_agent methods to be wrapped.
+    LayeredSpace is a composite of _AbstractSpace's, each named.
     """
-    def __init__(self, layers: Dict[str, _AbstractSpace] = {}):
+    def __init__(self, layers: Dict[str, _AbstractSpace] = {}, order=List[str] = []):
         super().__init__(_NullMetric)
         self.layers: Dict[str, _AbstractSpace] = layers
+        self.order: List[str] = order
         self._agent_to_layer: Dict[Agent, str] = {}
 
     # From _AbstractSpace
