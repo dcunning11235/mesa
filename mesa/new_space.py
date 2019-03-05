@@ -309,7 +309,7 @@ class _SocialAgentSpace(_SocialSpace):
                 consistency_check: Callable[['_SocialSpace', Content], bool] = None) -> None:
         super().__init__(metric, consistency_check)
 
-
+# Do _PatchSpaces **HAVE** to 'shadow' some other space?
 class _PatchSpace(_AbstractSpace):
     """_PatchSpace holds simple values, or wraps objects that present a simple
     value, which can be +,-,*,/, or ** together or with a scalar.  A `step`
@@ -435,12 +435,6 @@ class _PatchSpace(_AbstractSpace):
     @abstractmethod
     def __xor__(self, other: Any) -> '_PatchSpace':
         """Xor values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
-
-
-    @abstractmethod
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Content]]:
-        """Yield the patches in proximity to a position, possible including those
-        at the passed position."""
 
     @abstractmethod
     def step(self) -> None:
