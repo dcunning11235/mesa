@@ -312,7 +312,7 @@ class _SocialAgentSpace(_SocialSpace):
 
 class _PatchSpace(_AbstractSpace):
     """_PatchSpace holds simple values, or wraps objects that present a simple
-    value, which can be +,-,*,/, or ** together or with a scalar.  A `step`
+    value, which can be +,-,*,/,%,&,|,^ or ** together or with a scalar.  A `step`
     method is also included so that the _PatchSpace iself can be e.g. added to a
     scheduler.
 
@@ -320,7 +320,7 @@ class _PatchSpace(_AbstractSpace):
     another space, from which they take their metric and other properties
     (dimensions, indexing, etc.)
 
-    Subclasses must e.g. implement how they are initialized, etc.
+    Subclasses must e.g. implement how they are initialized, what backs them, etc.
     """
     @abstractmethod
     def __init__(self,
@@ -331,110 +331,115 @@ class _PatchSpace(_AbstractSpace):
         self.consistency_check = consistency_check
         self.steps = 0
 
-    @abstractmethod
     def __add__(self, other: Any) -> '_PatchSpace':
         """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+        ret = copy.copy(self)
+        ret += other
+        return ret
 
     @abstractmethod
     def __iadd__(self, other: Any) -> '_PatchSpace':
         """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
-    @abstractmethod
-    def __radd__(self, other: Any) -> '_PatchSpace':
-        """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+    __radd__ = __add__
 
-    @abstractmethod
     def __sub__(self, other: Any) -> '_PatchSpace':
-        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+        """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+        ret = copy.copy(self)
+        ret -= other
+        return ret
 
     @abstractmethod
     def __isub__(self, other: Any) -> '_PatchSpace':
         """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
 
-    @abstractmethod
-    def __rsub__(self, other: Any) -> '_PatchSpace':
-        """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
+    __rsub__ = __sub__
 
-    @abstractmethod
     def __mul__(self, other: Any) -> '_PatchSpace':
         """Element-by-element multiply values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
+        ret = copy.copy(self)
+        ret *= other
+        return ret
 
     @abstractmethod
     def __imul__(self, other: Any) -> '_PatchSpace':
         """Element-by-element multiplication of values of one _PatchSpace by
         another _PatchSpace, scalar, etc."""
 
-    @abstractmethod
-    def __rmul__(self, other: Any) -> '_PatchSpace':
-        """Element-by-element multiplication of values of one _PatchSpace by
-        another _PatchSpace, scalar, etc."""
+    __rmul__ = __mul__
 
-    @abstractmethod
     def __truediv__(self, other: Any) -> '_PatchSpace':
         """Element-by-element division of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
+        ret = copy.copy(self)
+        ret /= other
+        return ret
 
     @abstractmethod
     def __itruediv__(self, other: Any) -> '_PatchSpace':
         """Element-by-element division of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
-    @abstractmethod
     def __mod__(self, other: Any) -> '_PatchSpace':
         """Element-by-element mod of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
+        ret = copy.copy(self)
+        ret %= other
+        return ret
 
     @abstractmethod
     def __imod__(self, other: Any) -> '_PatchSpace':
         """Element-by-element mode of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
-    @abstractmethod
     def __pow__(self, other: Any) -> '_PatchSpace':
         """Element-by-element power of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
+        ret = copy.copy(self)
+        ret **= other
+        return ret
 
     @abstractmethod
     def __ipow__(self, other: Any) -> '_PatchSpace':
         """Element-by-element power of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
-    @abstractmethod
     def __and__(self, other: Any) -> '_PatchSpace':
         """And values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+        ret = copy.copy(self)
+        ret &= other
+        return ret
 
     @abstractmethod
     def __iand__(self, other: Any) -> '_PatchSpace':
         """And values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
-    @abstractmethod
-    def __rand__(self, other: Any) -> '_PatchSpace':
-        """And values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+    __rand__ = __and__
 
-    @abstractmethod
     def __or__(self, other: Any) -> '_PatchSpace':
         """Or values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+        ret = copy.copy(self)
+        ret |= other
+        return ret
 
     @abstractmethod
     def __ior__(self, other: Any) -> '_PatchSpace':
         """Or values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
-    @abstractmethod
-    def __ror__(self, other: Any) -> '_PatchSpace':
-        """Or values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+    __ror__ = __or__
 
-    @abstractmethod
     def __xor__(self, other: Any) -> '_PatchSpace':
         """Xor values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+        ret = copy.copy(self)
+        ret ^= other
+        return ret
 
     @abstractmethod
     def __ixor__(self, other: Any) -> '_PatchSpace':
         """Xor values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
-    @abstractmethod
-    def __xor__(self, other: Any) -> '_PatchSpace':
-        """Xor values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+    __rxor__ = __xor__
 
     @abstractmethod
     def step(self) -> None:
@@ -443,6 +448,23 @@ class _PatchSpace(_AbstractSpace):
         call of step.
         """
         self.steps += 1
+
+    def __contains__(self, pos_or_content: Union[Position, Content]) -> bool:
+        """Returns whether a position or content is in the space."""
+        return pos_or_content in self.base_space
+
+    @abstractmethod
+    def __iter__(self) -> Optional[Iterator[Union[Position, Content]]]:
+        """Returns an iterator over all keys (positions or content)"""
+        return iter(self.base_space)
+
+    @abstractmethod
+    def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Union[Position, Content]], None]:
+        """Yield the neighbors in proximity to a position or content, in this case
+        the patch values, possibly including those at the passed position."""
+
+class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
+    
 
 
 # Relies on __getitem__  on _AbstractSpace implementations not throwing
@@ -1015,54 +1037,21 @@ class NumpyPatchGrid(_PatchSpace):
 
         return ret
 
-    def __add__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
-        ret = copy.copy(self)
-        ret += other
-        return ret
-
     def __iadd__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid += self._verify_other(other)
         return self
-
-    __radd__ = __add__
-
-    def __sub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
-        ret = copy.copy(self)
-        ret -= other
-        return ret
 
     def __isub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid -= self._verify_other(other)
         return self
 
-    __rsub__ = __sub__
-
-    def __mul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
-        ret = copy.copy(self)
-        ret *= other
-        return ret
-
     def __imul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid *= self._verify_other(other)
         return self
 
-    __rmul__ = __mul__
-
-    def __truediv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
-        ret = copy.copy(self)
-        ret /= other
-        return ret
-
     def __itruediv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid /= self._verify_other(other)
         return self
-
-    __rtruediv__ = __truediv__
-
-    def __pow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
-        ret = copy.copy(self)
-        ret **= other
-        return ret
 
     def __ipow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
         self._grid **= self._verify_other(other)
