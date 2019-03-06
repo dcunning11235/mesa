@@ -25,7 +25,32 @@ ContinuousCoordinate = Tuple[float, float]
 
 class LayeredPosition(NamedTuple):
     layer: str
-    pos: Position
+    pos: Union[Position, Content]
+
+
+
+
+
+
+# Might use something like this to create a factory for e.g. _Metrics
+# This is not used anywhere yet, this is just...  a scratchpad copy.  A note.
+class UsableByMeta(type):
+    def __init__(cls, name, bases, dct):
+        if not hasattr(cls, 'registry'):
+            cls.registry = {}
+        else:
+            usable_by = getattr(cls, '__usable_by', None)
+            if target__for is not None:
+                if not isinstance(target__for, collections.Iterable):
+                    cls.registry[target__for] = (cls)
+                else:
+                    for tf in target__for:
+                        cls.registry[tf] = (cls)
+
+
+
+
+
 
 # Relying on Metric to do two actually different things... to allow _Metric
 # subclasses to get e.g. neighborhood, they may need to hold information, i.e.
@@ -61,15 +86,29 @@ class _Metric(ABC):
     @classmethod
     @abstractmethod
     def distance(cls, pos1: Position, pos2: Position, space: '_AbstractSpace') -> Optional[Distance]:
-        """Returns the distance (int or real) bewteen two positions, or None of
-        no such distance exists (one or both of the points don't exist, )"""
+        """Returns the distance (int or real) bewteen two positions, or None if
+        no such distance exists (for a non-exceptional reason...)"""
+        if pos1 not in space:
+            raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
+        if pos2 not in space:
+            raise LookupError("path_length failed because '{}' is not in space {}".format(pos2, space))
 
     @classmethod
-    @abstractmethod
     def path_length(cls, path: Iterator[Position], space: '_AbstractSpace') -> Optional[Distance]:
         """Returns the distance (real) along a given path/iterator of positions,
         or None if not such length exists (one or more points don't exist, a path
         is not possible/could nbot be found, etc.)"""
+        ret: Distance = 0
+        pos1: Position = next(path)
+        if pos1 not in space:
+            raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
+        for pos2 in path:
+            if pos1 not in space:
+                raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
+            ret += cls.distance(pos1, pos2, space)
+            pos1 = pos2
+
+        return ret
 
     @classmethod
     @abstractmethod
@@ -87,6 +126,9 @@ class _Metric(ABC):
         iterator of Position's if a discreet space, or a (sub)_AbstractSpace if
         continuous, or None if no neighborhood can be found (e.g. the `center`
         is invalid.)"""
+        if center not in space:
+            raise LookupError("path_length failed because '{}' is not in space {}".format(center, space))
+
 
 
 class _NullMetric(_Metric):
@@ -538,6 +580,21 @@ class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
         (Positon, Content) tuples."""
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Relies on __getitem__  on _AbstractSpace implementations not throwing
 # KeyError's but returning defaults, BUT ALSO doing their own bounds
 # checking and throwing errors appropriately.
@@ -560,7 +617,23 @@ class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
 # (3) Include a wrapper, e.g. a "NetworkToPositional" wrapper that "converts" the
 #     class (and would include a tranlsator... but not as part of LayeredSpace.)
 #
-class LayeredSpace(_AbstractSpace):
+# This also involves how LayeredSpaces are created.  Are they created (or
+# updated) by appending spaces on, like:
+#     stack = LayeredSpace(layers = {some layers}, order = [some order])
+#     stack.set_layer('foo1', foo1_layer, z=-7)
+#     stack.set_layer('foo2', foo2_layer, z=2)
+#     stack.del_layer('bar4')
+# This seems unessesary.  After all, the model structure, the layers, is set
+# at construction time...
+#
+# In that case, it should be like:
+#      stack = LayeredSpace(layers = {some layers}, order = [some order])
+# or maybe better yet:
+#      stack = LayeredSpace.new(layers = {some layers}, order = [some order])
+# where new could check for layer types and produce an appropriate LayeredSpace
+# subclass instance, as needed.
+#
+class LayeredSpace(_PositionalSpace):
     """
     LayeredSpace is a composite of _AbstractSpace's, each named.
     """
@@ -723,46 +796,30 @@ class LayeredSpace(_AbstractSpace):
         return cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_center)
 
 
-class BasicMetric(_Metric):
-    @classmethod
-    @abstractmethod
-    def distance(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Distance:
-        if pos1 not in space:
-            raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
-        if pos2 not in space:
-            raise LookupError("path_length failed because '{}' is not in space {}".format(pos2, space))
-
-        return 0
-
-    @classmethod
-    def path_length(cls, path: Iterator[Position], space: _AbstractSpace) -> Distance:
-        ret: Distance = 0
-        pos1: Position = next(path)
-        if pos1 not in space:
-            raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
-        for pos2 in path:
-            if pos1 not in space:
-                raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
-            ret += cls.distance(pos1, pos2, space)
-            pos1 = pos2
-
-        return ret
-
-    @classmethod
-    @abstractmethod
-    def neighborhood(cls, center: Position, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Iterator[GridCoordinate]:
-        if center not in space:
-            raise LookupError("path_length failed because '{}' is not in space {}".format(center, space))
-
-        return iter([])
 
 
-class EuclidianGridMetric(BasicMetric):
+
+
+
+
+
+
+
+
+
+
+
+class EuclidianGridMetric(_Metric):
     @classmethod
     def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
         super(EuclidianGridMetric, cls).distance(coord1, coord2, space)
 
         return sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2)
+
+    @classmethod
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Optional[Iterator[Position]]:
+        return iter([pos1, pos2])
+
 
     @classmethod
     def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Iterator[GridCoordinate]:
@@ -775,12 +832,16 @@ class EuclidianGridMetric(BasicMetric):
                     yield (center[0]+x, center[1]+y)
 
 
-class ManhattanGridMetric(BasicMetric):
+class ManhattanGridMetric(_Metric):
     @classmethod
     def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
         super(ManhattanGridMetric, cls).distance(coord1, coord2, space)
 
         return abs(coord1[0]-coord2[0]) + abs((coord1[1]-coord2[1]))
+
+    @classmethod
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Optional[Iterator[Position]]:
+        return iter([pos1, pos2])
 
     @classmethod
     def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Iterator[Position]:
@@ -792,12 +853,16 @@ class ManhattanGridMetric(BasicMetric):
                     yield (center[0]+x, center[1]+y)
 
 
-class ChebyshevGridMetric(BasicMetric):
+class ChebyshevGridMetric(_Metric):
     @classmethod
     def distance(cls, coord1: GridCoordinate, coord2: GridCoordinate, space: _AbstractSpace) -> Distance:
         super(ChebyshevGridMetric, cls).distance(coord1, coord2, space)
 
         return max(abs(coord1[0]-coord2[0]), abs((coord1[1]-coord2[1])))
+
+    @classmethod
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Optional[Iterator[Position]]:
+        return iter([pos1, pos2])
 
     @classmethod
     def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Iterator[Position]:
@@ -807,6 +872,22 @@ class ChebyshevGridMetric(BasicMetric):
             for x in range(-int(radius), int(radius)+1):
                 if include_center or (x != 0 and y != 0):
                     yield (center[0]+x, center[1]+y)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class ConsistencyChecks:
