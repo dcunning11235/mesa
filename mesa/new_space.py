@@ -151,7 +151,7 @@ class _PostionalSpace(_AbstractSpace):
 
     @property
     @abstractmethod
-    def default_value(self) -> Content:
+    def default_value(self) -> Optional[Content]:
         """Return whether the default value of the space.  For subclasses where
         __missing__ is called (or are infinite) this should be the value that
         intializes a point/cell/etc. such as set(), 0, None, etc."""
@@ -190,27 +190,25 @@ class _PostionalSpace(_AbstractSpace):
 
     @abstractmethod
     def neighborhood_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
-        """Yield the neighborhood at a position or content, either an iterator
-        over the keys or an _AbstractSpace containing only the subspace of the
+        """Yield the neighborhood at a position, either an iterator over the
+        keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
 
     @abstractmethod
     def neighborhood_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
-        """Yield the neighborhood at a position or content, either an iterator
+        """Yield the neighborhood around some content, either an iterator
         over the keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
 
     @abstractmethod
     def neighbors_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Content], None]:
-        """Yield the neighborhood at a position or content, either an iterator
-        over the keys or an _AbstractSpace containing only the subspace of the
-        neighborhood."""
+        """Yield the neighbors at/around a position as an iterator over the
+        neighbors."""
 
     @abstractmethod
-    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Content], '_PostionalSpace', None]:
-        """Yield the neighborhood at a position or content, either an iterator
-        over the keys or an _AbstractSpace containing only the subspace of the
-        neighborhood."""
+    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Content], None]:
+        """Yield the neighbors around some content as an iterator over the
+        neighbors."""
 
 
 class _SocialSpace(_AbstractSpace):
@@ -285,8 +283,9 @@ class _PositionalAgentSpace(_PostionalSpace):
         if self.is_continuous or include_self:
             return self.neighbors(self.find_agent(content), radius, True)
 
+        self_post = self.find_agent(content)
         for a in self.neighbors(self.find_agent(content), radius, True):
-            if self != a:
+            if self_pos != a:
                 yield a
 
     def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Content], None]:
@@ -453,7 +452,6 @@ class _PatchSpace(_AbstractSpace):
         """Returns whether a position or content is in the space."""
         return pos_or_content in self.base_space
 
-    @abstractmethod
     def __iter__(self) -> Optional[Iterator[Union[Position, Content]]]:
         """Returns an iterator over all keys (positions or content)"""
         return iter(self.base_space)
@@ -462,9 +460,82 @@ class _PatchSpace(_AbstractSpace):
     def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Union[Position, Content]], None]:
         """Yield the neighbors in proximity to a position or content, in this case
         the patch values, possibly including those at the passed position."""
+        return self.base_space.neighbors(pos_or_content, radius, include_pos_or_content)
+
 
 class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
-    
+    @abstractmethod
+    def __init__(self,
+                base_space: _PositionalSpace,
+                consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None) -> None:
+        super().__init__(base_space, consistency_check)
+
+    @property
+    def is_continuous(self) -> bool:
+        return self.base_space.is_continuous
+
+    @property
+    def default_value(self) -> Optional[Content]:
+        """Return whether the default value of the space.  For subclasses where
+        __missing__ is called (or are infinite) this should be the value that
+        intializes a point/cell/etc. such as set(), 0, None, etc."""
+
+    @abstractmethod
+    def content(self) -> Optional[Iterator[Content]]:
+        """Returns an Iterator that gives all content, flattened if e.g. multiple
+        items are stored at each location."""
+
+    @abstractmethod
+    def all(self) -> Iterator[Tuple[Position, Optional[Content]]]:
+        """Returns an Iterator that gives all (Position, Content) tuples, flattened
+        if e.g. multiple items are stored at each location."""
+
+    @abstractmethod
+    def __getitem__(self, pos: Position) -> Optional[Content]:
+        """Return the content at a position, or an iterator over such.
+        Called by `_AbstractSpace()[pos]`."""
+
+    @abstractmethod
+    def __setitem__(self, pos: Position, content: Optional[Content]) -> None:
+        """*Sets or adds* the content at a position.
+        Called by `_AbstractSpace()[pos] = content`."""
+
+    @abstractmethod
+    def __delitem__(self, pos: Position) -> None:
+        """Delete content or value at a position.  This should *not* remove the
+        position itself (e.g. unlike `del dict[key]`).  E.g. a Grid implementation
+        should should still return some 'empty' value for coordinates that are
+        in-bounds.  See `__missing__`."""
+
+    @abstractmethod
+    def __missing__(self, pos: Position) -> Optional[Content]:
+        """Handle missing positions.  Used for e.g. lazy filling.  Should raise
+        an appropriate exception for e.g. out-of-bounds positions."""
+
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
+        """Yield the neighborhood at a position, either an iterator over the
+        keys or an _AbstractSpace containing only the subspace of the
+        neighborhood."""
+        return self.base_space.neighborhood_at(pos, radius, include_center)
+
+    def neighborhood_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
+        """Yield the neighborhood around some content *in the underlying
+        self.base_space*, either an iterator over the keys or an _AbstractSpace
+        containing only the subspace of the neighborhood."""
+        return self.base_space.neighborhood_of(content, radius, include_self)
+
+    @abstractmethod
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Tuple(Position, Content)], None]:
+        """Yield the patch neighbors at/around a position as an iterator over the
+        neighbors.  Note that since patches may (likely) be simple types e.g.
+        int's, the iterator is over (Positon, Content) tuples. """
+
+    @abstractmethod
+    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Tuple(Position, Content)], None]:
+        """Yield the patch neighbors around some content *in the underlying
+        self.base_space* as an iterator over the neighbors.  Note that since
+        patches may (likely) be simple types e.g. int's, the iterator is over
+        (Positon, Content) tuples."""
 
 
 # Relies on __getitem__  on _AbstractSpace implementations not throwing
