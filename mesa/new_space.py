@@ -1,9 +1,9 @@
-#from __future__ import annotations
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from mesa.agent import Agent
-from typing import Any, Tuple, Set, Union, Optional, Callable, NamedTuple, Dict, \
-    NewType, Iterator, Type, cast
+from typing import Any, Tuple, Set, List, Union, Optional, Callable, NamedTuple, \
+    Dict, Iterator, Type, cast
 from collections import namedtuple
 from itertools import chain
 from math import pow, sqrt
@@ -28,10 +28,6 @@ class LayeredPosition(NamedTuple):
     pos: Union[Position, Content]
 
 
-
-
-
-
 # Might use something like this to create a factory for e.g. _Metrics
 # This is not used anywhere yet, this is just...  a scratchpad copy.  A note.
 class UsableByMeta(type):
@@ -46,10 +42,6 @@ class UsableByMeta(type):
                 else:
                     for tf in target__for:
                         cls.registry[tf] = (cls)
-
-
-
-
 
 
 # Relying on Metric to do two actually different things... to allow _Metric
@@ -85,19 +77,21 @@ class _Metric(ABC):
     """
     @classmethod
     @abstractmethod
-    def distance(cls, pos1: Position, pos2: Position, space: '_AbstractSpace') -> Optional[Distance]:
-        """Returns the distance (int or real) bewteen two positions, or None if
-        no such distance exists (for a non-exceptional reason...)"""
+    def distance(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Distance:
+        """Returns the distance (int or real) bewteen two positions or raises an
+        exception if no such distance exists"""
         if pos1 not in space:
             raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
         if pos2 not in space:
             raise LookupError("path_length failed because '{}' is not in space {}".format(pos2, space))
 
+        return 0
+
     @classmethod
-    def path_length(cls, path: Iterator[Position], space: '_AbstractSpace') -> Optional[Distance]:
+    def path_length(cls, path: Iterator[Position], space: _AbstractSpace) -> Distance:
         """Returns the distance (real) along a given path/iterator of positions,
-        or None if not such length exists (one or more points don't exist, a path
-        is not possible/could nbot be found, etc.)"""
+        or raises an exception if not such length exists (one or more points
+        don't exist, a path is not possible/could nbot be found, etc.)"""
         ret: Distance = 0
         pos1: Position = next(path)
         if pos1 not in space:
@@ -112,16 +106,16 @@ class _Metric(ABC):
 
     @classmethod
     @abstractmethod
-    def path(cls, pos1: Position, pos2: Position, space: '_AbstractSpace') -> Optional[Iterator[Position]]:
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Iterator[Position]:
         """Returns a path bewteen two positions, one that (perhaps not uniquely)
         corresponds with the distance returned by `distance`.  For a continuous
         space this will be an approximation of a path by some number of points,
         minimally `(pos1, pos2)`.  If no path is possible (or can be found),
-        None is returned."""
+        an exception will be raised."""
 
     @classmethod
     @abstractmethod
-    def neighborhood(cls, center: Position, radius: Distance, space: '_AbstractSpace', include_center: bool = True) -> Union[Iterator[Position], '_AbstractSpace', None]:
+    def neighborhood(cls, center: Position, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Union[Iterator[Position], _AbstractSpace]:
         """Returns the neighborhood of a point with the given radius.  Returns an
         iterator of Position's if a discreet space, or a (sub)_AbstractSpace if
         continuous, or None if no neighborhood can be found (e.g. the `center`
@@ -129,24 +123,7 @@ class _Metric(ABC):
         if center not in space:
             raise LookupError("path_length failed because '{}' is not in space {}".format(center, space))
 
-
-
-class _NullMetric(_Metric):
-    @classmethod
-    def distance(cls, pos1: Position, pos2: Position, space: '_AbstractSpace') -> Optional[Distance]:
-        return None
-
-    @classmethod
-    def path_length(cls, path: Iterator[Position], space: '_AbstractSpace') -> Optional[Distance]:
-        return None
-
-    @classmethod
-    def path(cls, pos1: Position, pos2: Position, space: '_AbstractSpace') -> Optional[Iterator[Position]]:
-        return None
-
-    @classmethod
-    def neighborhood(cls, center: Position, radius: Distance, space: '_AbstractSpace', include_center: bool = True) -> Union[Iterator[Position], '_AbstractSpace', None]:
-        return None
+        return iter([])
 
 
 # I think I really need to step back here and think about the idea of a network vs
@@ -154,13 +131,12 @@ class _NullMetric(_Metric):
 # or grid or "space" of positons that Agents may (or may not) occupy, singularly
 # or in multiple.  Treating Agents as (potential) Positions just about solves this,
 # but I think there there may in fact be plenty here to have to trunks of a class
-# hierarchy, an _AgentNetwork and an _AgentSpace trunk, each of which share a
+# hierarchy, an _AgentNetwork and an _PositionalAgentSpace trunk, each of which share a
 # fairly minimal base class (__contain__, neighborhood_at, and possibly all of
 # __get/set/delitem__).  I need to think about this more tomorrow.
 class _AbstractSpace(ABC):
     @abstractmethod
-    def __init__(self,
-                metric: Union[_Metric, Type[_Metric]]) -> None:
+    def __init__(self, metric: Type[_Metric]) -> None:
         super().__init__()
         self.metric = metric
 
@@ -169,21 +145,21 @@ class _AbstractSpace(ABC):
         """Returns whether a position or content is in the space."""
 
     @abstractmethod
-    def __iter__(self) -> Optional[Iterator[Union[Position, Content]]]:
+    def __iter__(self) -> Iterator[Union[Position, Content]]:
         """Returns an iterator over all keys (positions or content)"""
 
     @abstractmethod
-    def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Content], None]:
+    def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Content]:
         """Yield the neighbors in proximity to a position or content, possible including those
         at the passed position."""
 
 
-class _PostionalSpace(_AbstractSpace):
+class _PositionalSpace(_AbstractSpace):
     @abstractmethod
     def __init__(self,
-                metric: Union[_Metric, Type[_Metric]],
-                consistency_check: Callable[['_PositionalSpace', Position, Content], bool] = None) -> None:
-        super().__init__(metric)
+                consistency_check: Callable[[_PositionalSpace, Position, Content], bool] = None,
+                **kwargs) -> None:
+        super().__init__(**kwargs)
         self.consistency_check = consistency_check
 
     @property
@@ -199,7 +175,7 @@ class _PostionalSpace(_AbstractSpace):
         intializes a point/cell/etc. such as set(), 0, None, etc."""
 
     @abstractmethod
-    def content(self) -> Optional[Iterator[Content]]:
+    def content(self) -> Iterator[Content]:
         """Returns an Iterator that gives all content, flattened if e.g. multiple
         items are stored at each location."""
 
@@ -209,7 +185,7 @@ class _PostionalSpace(_AbstractSpace):
         if e.g. multiple items are stored at each location."""
 
     @abstractmethod
-    def __getitem__(self, pos: Position) -> Union[Iterator[Content], Content, None]:
+    def __getitem__(self, pos: Position) -> Union[Iterator[Content], Content]:
         """Return the content at a position, or an iterator over such.
         Called by `_AbstractSpace()[pos]`."""
 
@@ -231,24 +207,24 @@ class _PostionalSpace(_AbstractSpace):
         an appropriate exception for e.g. out-of-bounds positions."""
 
     @abstractmethod
-    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood at a position, either an iterator over the
         keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
 
     @abstractmethod
-    def neighborhood_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
+    def neighborhood_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood around some content, either an iterator
         over the keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
 
     @abstractmethod
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Content], None]:
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Content]:
         """Yield the neighbors at/around a position as an iterator over the
         neighbors."""
 
     @abstractmethod
-    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Content], None]:
+    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Content]:
         """Yield the neighbors around some content as an iterator over the
         neighbors."""
 
@@ -256,18 +232,16 @@ class _PostionalSpace(_AbstractSpace):
 class _SocialSpace(_AbstractSpace):
     @abstractmethod
     def __init__(self,
-                metric: Union[_Metric, Type[_Metric]],
-                consistency_check: Callable[['_SocialSpace', Content], bool] = None) -> None:
-        super().__init__(metric)
+                consistency_check: Callable[[_SocialSpace, Content], bool] = None,
+                **kwargs) -> None:
+        super().__init__(**kwargs)
         self.consistency_check = consistency_check
 
 
-class _PositionalAgentSpace(_PostionalSpace):
+class _PositionalAgentSpace(_PositionalSpace):
     @abstractmethod
-    def __init__(self,
-                metric: Union[_Metric, Type[_Metric]],
-                consistency_check: Callable[['_PositionalSpace', Position, Content], bool] = None) -> None:
-        super().__init__(metric, consistency_check)
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
         self._agent_to_pos: Dict[Agent, Position] = {}
 
     def place_agent(self, pos: Position, agent: Agent) -> None:
@@ -287,7 +261,7 @@ class _PositionalAgentSpace(_PostionalSpace):
         """Return where an agent is (its Position) within the space."""
         return self._agent_to_pos.get(agent, None)
 
-    def agents_at(self, pos: Position) -> Optional[Iterator[Agent]]:
+    def agents_at(self, pos: Position) -> Iterator[Agent]:
         """Yield the neighbors at a given position (i.e. neighnors_at, but with
         radius=0)."""
         return self.neighbors_at(pos, 0, True)
@@ -298,10 +272,10 @@ class _PositionalAgentSpace(_PostionalSpace):
         radius=0)."""
 
     @abstractmethod
-    def content(self) -> Optional[Iterator[Content]]:
+    def content(self) -> Iterator[Content]:
         """Returns an Iterator that gives all content, flattened if e.g. multiple
         items are stored at each location."""
-        return self._agent_to_pos.keys()
+        return iter(self._agent_to_pos.keys())
 
     @abstractmethod
     def all(self) -> Iterator[Tuple[Position, Content]]:
@@ -309,13 +283,13 @@ class _PositionalAgentSpace(_PostionalSpace):
         if e.g. multiple items are stored at each location."""
         return map(lambda tup: (tup[1], tup[0]), self._agent_to_pos.items())
 
-    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood at a position or content, either an iterator
         over the keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
         return self.neighbors(pos, radius, include_center)
 
-    def neighborhood_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
+    def neighborhood_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood at a position or content, either an iterator
         over the keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
@@ -325,18 +299,18 @@ class _PositionalAgentSpace(_PostionalSpace):
         if self.is_continuous or include_self:
             return self.neighbors(self.find_agent(content), radius, True)
 
-        self_post = self.find_agent(content)
+        self_pos = self.find_agent(content)
         for a in self.neighbors(self.find_agent(content), radius, True):
             if self_pos != a:
                 yield a
 
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Content], None]:
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Content]:
         """Yield the neighborhood at a position or content, either an iterator
         over the keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
         return chain(*[self.agents_at(n) for n in self.neighborhood_at(pos, radius, include_center)])
 
-    def neighbors_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Union[Iterator[Content], '_PostionalSpace', None]:
+    def neighbors_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Iterator[Content]:
         """Yield the neighborhood at a position or content, either an iterator
         over the keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
@@ -345,10 +319,8 @@ class _PositionalAgentSpace(_PostionalSpace):
 
 class _SocialAgentSpace(_SocialSpace):
     @abstractmethod
-    def __init__(self,
-                metric: Union[_Metric, Type[_Metric]],
-                consistency_check: Callable[['_SocialSpace', Content], bool] = None) -> None:
-        super().__init__(metric, consistency_check)
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
 
 
 class _PatchSpace(_AbstractSpace):
@@ -364,39 +336,36 @@ class _PatchSpace(_AbstractSpace):
     Subclasses must e.g. implement how they are initialized, what backs them, etc.
     """
     @abstractmethod
-    def __init__(self,
-                base_space: _AbstractSpace,
-                consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None) -> None:
+    def __init__(self, base_space: _AbstractSpace) -> None:
         super().__init__(base_space.metric)
         self.base_space = base_space
-        self.consistency_check = consistency_check
         self.steps = 0
 
-    def __add__(self, other: Any) -> '_PatchSpace':
+    def __add__(self, other: Any) -> _PatchSpace:
         """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
         ret = copy.copy(self)
         ret += other
         return ret
 
     @abstractmethod
-    def __iadd__(self, other: Any) -> '_PatchSpace':
+    def __iadd__(self, other: Any) -> _PatchSpace:
         """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     __radd__ = __add__
 
-    def __sub__(self, other: Any) -> '_PatchSpace':
+    def __sub__(self, other: Any) -> _PatchSpace:
         """Add values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
         ret = copy.copy(self)
         ret -= other
         return ret
 
     @abstractmethod
-    def __isub__(self, other: Any) -> '_PatchSpace':
+    def __isub__(self, other: Any) -> _PatchSpace:
         """Subtract values of one _PatchSpace, scalar, etc. from another _PatchSpace"""
 
     __rsub__ = __sub__
 
-    def __mul__(self, other: Any) -> '_PatchSpace':
+    def __mul__(self, other: Any) -> _PatchSpace:
         """Element-by-element multiply values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
         ret = copy.copy(self)
@@ -404,13 +373,13 @@ class _PatchSpace(_AbstractSpace):
         return ret
 
     @abstractmethod
-    def __imul__(self, other: Any) -> '_PatchSpace':
+    def __imul__(self, other: Any) -> _PatchSpace:
         """Element-by-element multiplication of values of one _PatchSpace by
         another _PatchSpace, scalar, etc."""
 
     __rmul__ = __mul__
 
-    def __truediv__(self, other: Any) -> '_PatchSpace':
+    def __truediv__(self, other: Any) -> _PatchSpace:
         """Element-by-element division of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
         ret = copy.copy(self)
@@ -418,11 +387,11 @@ class _PatchSpace(_AbstractSpace):
         return ret
 
     @abstractmethod
-    def __itruediv__(self, other: Any) -> '_PatchSpace':
+    def __itruediv__(self, other: Any) -> _PatchSpace:
         """Element-by-element division of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
-    def __mod__(self, other: Any) -> '_PatchSpace':
+    def __mod__(self, other: Any) -> _PatchSpace:
         """Element-by-element mod of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
         ret = copy.copy(self)
@@ -430,11 +399,11 @@ class _PatchSpace(_AbstractSpace):
         return ret
 
     @abstractmethod
-    def __imod__(self, other: Any) -> '_PatchSpace':
+    def __imod__(self, other: Any) -> _PatchSpace:
         """Element-by-element mode of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
-    def __pow__(self, other: Any) -> '_PatchSpace':
+    def __pow__(self, other: Any) -> _PatchSpace:
         """Element-by-element power of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
         ret = copy.copy(self)
@@ -442,42 +411,42 @@ class _PatchSpace(_AbstractSpace):
         return ret
 
     @abstractmethod
-    def __ipow__(self, other: Any) -> '_PatchSpace':
+    def __ipow__(self, other: Any) -> _PatchSpace:
         """Element-by-element power of values of one _PatchSpace by another
         _PatchSpace, scalar, etc."""
 
-    def __and__(self, other: Any) -> '_PatchSpace':
+    def __and__(self, other: Any) -> _PatchSpace:
         """And values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
         ret = copy.copy(self)
         ret &= other
         return ret
 
     @abstractmethod
-    def __iand__(self, other: Any) -> '_PatchSpace':
+    def __iand__(self, other: Any) -> _PatchSpace:
         """And values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     __rand__ = __and__
 
-    def __or__(self, other: Any) -> '_PatchSpace':
+    def __or__(self, other: Any) -> _PatchSpace:
         """Or values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
         ret = copy.copy(self)
         ret |= other
         return ret
 
     @abstractmethod
-    def __ior__(self, other: Any) -> '_PatchSpace':
+    def __ior__(self, other: Any) -> _PatchSpace:
         """Or values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     __ror__ = __or__
 
-    def __xor__(self, other: Any) -> '_PatchSpace':
+    def __xor__(self, other: Any) -> _PatchSpace:
         """Xor values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
         ret = copy.copy(self)
         ret ^= other
         return ret
 
     @abstractmethod
-    def __ixor__(self, other: Any) -> '_PatchSpace':
+    def __ixor__(self, other: Any) -> _PatchSpace:
         """Xor values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
     __rxor__ = __xor__
@@ -494,27 +463,25 @@ class _PatchSpace(_AbstractSpace):
         """Returns whether a position or content is in the space."""
         return pos_or_content in self.base_space
 
-    def __iter__(self) -> Optional[Iterator[Union[Position, Content]]]:
+    def __iter__(self) -> Iterator[Union[Position, Content]]:
         """Returns an iterator over all keys (positions or content)"""
         return iter(self.base_space)
 
     @abstractmethod
-    def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Union[Position, Content]], None]:
+    def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Union[Position, Content]]:
         """Yield the neighbors in proximity to a position or content, in this case
         the patch values, possibly including those at the passed position."""
         return self.base_space.neighbors(pos_or_content, radius, include_pos_or_content)
 
 
-class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
+class _PositionalPatchSpace(_PositionalSpace, _PatchSpace):
     @abstractmethod
-    def __init__(self,
-                base_space: _PositionalSpace,
-                consistency_check: Callable[[_AbstractSpace, Position, Content], bool] = None) -> None:
-        super().__init__(base_space, consistency_check)
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
 
     @property
     def is_continuous(self) -> bool:
-        return self.base_space.is_continuous
+        return cast(_PositionalSpace, self.base_space).is_continuous
 
     @property
     def default_value(self) -> Optional[Content]:
@@ -523,7 +490,7 @@ class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
         intializes a point/cell/etc. such as set(), 0, None, etc."""
 
     @abstractmethod
-    def content(self) -> Optional[Iterator[Content]]:
+    def content(self) -> Iterator[Content]:
         """Returns an Iterator that gives all content, flattened if e.g. multiple
         items are stored at each location."""
 
@@ -554,51 +521,32 @@ class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
         """Handle missing positions.  Used for e.g. lazy filling.  Should raise
         an appropriate exception for e.g. out-of-bounds positions."""
 
-    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood at a position, either an iterator over the
         keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
-        return self.base_space.neighborhood_at(pos, radius, include_center)
+        return cast(_PositionalSpace, self.base_space).neighborhood_at(pos, radius, include_center)
 
-    def neighborhood_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Union[Iterator[Position], '_PostionalSpace', None]:
+    def neighborhood_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood around some content *in the underlying
         self.base_space*, either an iterator over the keys or an _AbstractSpace
         containing only the subspace of the neighborhood."""
-        return self.base_space.neighborhood_of(content, radius, include_self)
+        return cast(_PositionalSpace, self.base_space).neighborhood_of(content, radius, include_self)
 
     @abstractmethod
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Tuple(Position, Content)], None]:
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Tuple[Position, Content]]:
         """Yield the patch neighbors at/around a position as an iterator over the
         neighbors.  Note that since patches may (likely) be simple types e.g.
         int's, the iterator is over (Positon, Content) tuples. """
 
     @abstractmethod
-    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Tuple(Position, Content)], None]:
+    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Tuple[Position, Content]]:
         """Yield the patch neighbors around some content *in the underlying
         self.base_space* as an iterator over the neighbors.  Note that since
         patches may (likely) be simple types e.g. int's, the iterator is over
         (Positon, Content) tuples."""
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Relies on __getitem__  on _AbstractSpace implementations not throwing
-# KeyError's but returning defaults, BUT ALSO doing their own bounds
-# checking and throwing errors appropriately.
-#
 # How to layer spaces that rely on different topologies.  E.g. a Grid full of
 # farmers, a grid of merchants, a couple of corresponging GridPatchSpace's, and...
 # a SocialNetwork of cities.  We can force the network type.  That is easy
@@ -611,7 +559,7 @@ class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
 # Have to think more on this.
 #
 # Possible solutions:
-# (1) Force the re-implementation to PositionalNetwork
+# (1) Force the re-implementation to PositionalNetwork <--------- DOING THIS
 # (2) Include some kind of lookup/mapper as part of or utility class passed to
 #     LayeredSpace
 # (3) Include a wrapper, e.g. a "NetworkToPositional" wrapper that "converts" the
@@ -619,10 +567,10 @@ class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
 #
 # This also involves how LayeredSpaces are created.  Are they created (or
 # updated) by appending spaces on, like:
-#     stack = LayeredSpace(layers = {some layers}, order = [some order])
-#     stack.set_layer('foo1', foo1_layer, z=-7)
-#     stack.set_layer('foo2', foo2_layer, z=2)
-#     stack.del_layer('bar4')
+#     stack = LayeredSpace(layers = {some layers}, order = [some order])  <--- YES
+#     stack.set_layer('foo1', foo1_layer, z=-7) <--- NO
+#     stack.set_layer('foo2', foo2_layer, z=2) <--- NO
+#     stack.del_layer('bar4') <--- NO
 # This seems unessesary.  After all, the model structure, the layers, is set
 # at construction time...
 #
@@ -633,69 +581,47 @@ class _PositionalPatchSpace(_PatchSpace, _PostionalSpace):
 # where new could check for layer types and produce an appropriate LayeredSpace
 # subclass instance, as needed.
 #
-class LayeredSpace(_PositionalSpace):
+class LayeredSpace(_PositionalAgentSpace):
     """
     LayeredSpace is a composite of _AbstractSpace's, each named.
     """
-    def __init__(self, layers: Dict[str, _AbstractSpace] = {}, order=List[str] = []):
-        super().__init__(_NullMetric)
-        self.layers: Dict[str, _AbstractSpace] = layers
+    def __init__(self, layers: Dict[str, _PositionalSpace] = {}, order: List[str] = []):
+        super().__init__()
+        self.layers: Dict[str, _PositionalSpace] = layers
         self.order: List[str] = order
         self._agent_to_layer: Dict[Agent, str] = {}
 
-    # From _AbstractSpace
-    def __getitem__(self, pos: LayeredPosition) -> Content:
-        return self.layers[pos.layer][pos.pos]
+    def __getitem__(self, pos: Union[str, LayeredPosition]) -> Union[_AbstractSpace, Content]:
+        if isinstance(pos, str):
+            return self.layers[pos]
+        else:
+            return self.layers[pos.layer][pos.pos]
 
-    def get_layer(self, layer: str) -> _AbstractSpace:
-        return self.layers[layer]
-
-    # From _AbstractSpace
     def __setitem__(self, pos: LayeredPosition, content: Content) -> None:
         self.layers[pos.layer][pos.pos] = content
-
-        del self._agent_to_layer[content]
         if isinstance(content, Agent):
             self._agent_to_layer[content] = pos.layer
 
-    def set_layer(self, layer_name:str, layer: _AbstractSpace) -> None:
-        old_layer = self.layers[layer_name] if layer_name in self.layers else None
-        self.layers[layer_name] = layer
-
-        if old_layer is not None and isinstance(old_layer, _AgentSpace):
-            for agent in old_layer.agents:
-                del self._agent_to_layer[agent]
-        if isinstance(layer, _AgentSpace):
-            for agent in layer.agents:
-                self._agent_to_layer[agent] = layer_name
-
-
-    # From _AgentSpace
     def __delitem__(self, pos_or_content: Union[LayeredPosition, Content]) -> None:
         if isinstance(pos_or_content, LayeredPosition):
             del self.layers[pos_or_content.layer][pos_or_content.pos]
         else:
             for l in self.layers.values():
-                if isinstance(l, _AgentSpace) and pos_or_content in l:
+                if isinstance(l, _PositionalAgentSpace) and pos_or_content in l:
                     del l[pos_or_content]
 
-    def del_layer(self, layer_name: str) -> None:
-        del self.layers[layer_name]
-
-    # From _AgentSpace
-    def __contains__(self, pos_or_content: Union[LayeredPosition, Content]) -> bool:
+    def __contains__(self, pos_or_content: Union[str, LayeredPosition, Content]) -> bool:
         if isinstance(pos_or_content, LayeredPosition):
             return pos_or_content.pos in self.layers[pos_or_content.layer]
+        elif isinstance(pos_or_content, str):
+            return pos_or_content in self.layers
         else:
             for l in self.layers.values():
-                if isinstance(l, _AgentSpace):
+                if isinstance(l, _PositionalAgentSpace):
                     if pos_or_content in l:
                         return True
 
         return False
-
-    def contains_layer(self, layer_name: str) -> bool:
-        return layer_name in self.layers
 
     def get_common_positions(self) -> Iterator[Position]:
         """This could potentially be a very expensive call.  It depends entirely
@@ -708,11 +634,11 @@ class LayeredSpace(_PositionalSpace):
         for layer in self.layers.values():
             if not layer.is_continuous:
                 if not found_discreet:
-                    common_discreet_positions |= set(layer.get_all_positions())
+                    common_discreet_positions |= set(layer)
                 elif len(common_discreet_positions) == 0:
                     break
                 else:
-                    common_discreet_positions &= set(layer.get_all_positions())
+                    common_discreet_positions &= set(layer)
             else:
                 continuous_spaces.add(layer)
 
@@ -733,23 +659,21 @@ class LayeredSpace(_PositionalSpace):
         else:
             raise NotImplementedError("Left medium (to heavy..?) lifting until later")
 
-    # From _AgentSpace
     def place_agent(self, pos: LayeredPosition, agent: Agent) -> None:
         """Place an agent at a specific position."""
-        if isinstance(self.layers[pos.layer], _AgentSpace):
-            cast(_AgentSpace, self.layers[pos.layer]).place_agent(agent, pos.pos)
+        if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
+            cast(_PositionalAgentSpace, self.layers[pos.layer]).place_agent(agent, pos.pos)
             self._agent_to_layer[agent] = pos.layer
         else:
-            raise TypeError("Cannot add agent to layer '{}' because it is not of type _AgentSpace".format(pos.layer))
+            raise TypeError("Cannot add agent to layer '{}' because it is not of type _PositionalAgentSpace".format(pos.layer))
 
-    # From _AgentSpace
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
-        if isinstance(self.layers[self._agent_to_layer[agent]], _AgentSpace):
-            cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).remove_agent(agent)
+        if isinstance(self.layers[self._agent_to_layer[agent]], _PositionalAgentSpace):
+            cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).remove_agent(agent)
         else:
             raise TypeError("Something went wrong!  Cannot remove agent {} because \
-                it is mapped to layer {}, which is not an _AgentSpace.  The layer \
+                it is mapped to layer {}, which is not an _PositionalAgentSpace.  The layer \
                 mapping has been removed.".format(agent, self._agent_to_layer[agent]))
         del self._agent_to_layer[agent]
 
@@ -758,55 +682,42 @@ class LayeredSpace(_PositionalSpace):
         the passed `pos` is of type `LayeredPosition`, else yield the agents at
         the passed `Position` for all layers"""
         if isinstance(pos, LayeredPosition):
-            if isinstance(self.layers[pos.layer], _AgentSpace):
-                return cast(_AgentSpace, self.layers[pos.layer]).agents_at(pos.pos)
+            if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
+                return cast(_PositionalAgentSpace, self.layers[pos.layer]).agents_at(pos.pos)
             else:
                 raise TypeError("Cannot return agents from layer '{}', it is not \
-                    an instance of _AgentSpace.".format(pos.layer))
+                    an instance of _PositionalAgentSpace.".format(pos.layer))
         else:
-            return chain(*[l.agents_at(pos) for l in self.layers.values() if isinstance(l, _AgentSpace)])
+            return chain(*[l.agents_at(pos) for l in self.layers.values() if isinstance(l, _PositionalAgentSpace)])
 
     def count_agents_at(self, pos: Union[Position, LayeredPosition]) -> int:
         if isinstance(pos, LayeredPosition):
-            if isinstance(self.layers[pos.layer], _AgentSpace):
-                return cast(_AgentSpace, self.layers[pos.layer]).count_agents_at(pos.pos)
+            if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
+                return cast(_PositionalAgentSpace, self.layers[pos.layer]).count_agents_at(pos.pos)
             else:
                 raise TypeError("Cannot return agents from layer '{}', it is not \
-                    an instance of _AgentSpace.".format(pos.layer))
+                    an instance of _PositionalAgentSpace.".format(pos.layer))
         else:
-            return sum([l.count_agents_at(pos) for l in self.layers.values() if isinstance(l, _AgentSpace)])
+            return sum([l.count_agents_at(pos) for l in self.layers.values() if isinstance(l, _PositionalAgentSpace)])
 
     def neighbors_at(self, pos: Union[Position, LayeredPosition], radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the agents in proximity to a position."""
         if isinstance(pos, LayeredPosition):
-            if isinstance(self.layers[pos.layer], _AgentSpace):
-                return cast(_AgentSpace, self.layers[pos.layer]).neighbors_at(pos.pos, radius, include_center)
+            if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
+                return cast(_PositionalAgentSpace, self.layers[pos.layer]).neighbors_at(pos.pos, radius, include_center)
             else:
                 raise TypeError("Cannot get neighbors at pos '{}' in layer '{}' \
-                    because it is not of type _AgentSpace".format(pos.pos, pos.layer))
+                    because it is not of type _PositionalAgentSpace".format(pos.pos, pos.layer))
         else:
-            return chain(*[l.neighbors_at(pos, radius, include_center) for l in self.layers.values() if isinstance(l, _AgentSpace)])
+            return chain(*[l.neighbors_at(pos, radius, include_center) for l in self.layers.values() if isinstance(l, _PositionalAgentSpace)])
 
     def neighbors_of(self, agent: Agent, radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the neighbors of an agent."""
-        return cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).neighbors_of(agent, radius, include_center)
+        return cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).neighbors_of(agent, radius, include_center)
 
-    def neighborhood_of(self, agent: Agent, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _AbstractSpace]:
+    def neighborhood_of(self, agent: Agent, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood of an agent."""
-        return cast(_AgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_center)
-
-
-
-
-
-
-
-
-
-
-
-
-
+        return cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_center)
 
 
 class EuclidianGridMetric(_Metric):
@@ -817,9 +728,8 @@ class EuclidianGridMetric(_Metric):
         return sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2)
 
     @classmethod
-    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Optional[Iterator[Position]]:
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Iterator[Position]:
         return iter([pos1, pos2])
-
 
     @classmethod
     def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Iterator[GridCoordinate]:
@@ -840,7 +750,7 @@ class ManhattanGridMetric(_Metric):
         return abs(coord1[0]-coord2[0]) + abs((coord1[1]-coord2[1]))
 
     @classmethod
-    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Optional[Iterator[Position]]:
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Iterator[Position]:
         return iter([pos1, pos2])
 
     @classmethod
@@ -861,7 +771,7 @@ class ChebyshevGridMetric(_Metric):
         return max(abs(coord1[0]-coord2[0]), abs((coord1[1]-coord2[1])))
 
     @classmethod
-    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Optional[Iterator[Position]]:
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Iterator[Position]:
         return iter([pos1, pos2])
 
     @classmethod
@@ -872,22 +782,6 @@ class ChebyshevGridMetric(_Metric):
             for x in range(-int(radius), int(radius)+1):
                 if include_center or (x != 0 and y != 0):
                     yield (center[0]+x, center[1]+y)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class ConsistencyChecks:
@@ -922,7 +816,7 @@ class ConsistencyChecks:
 
 class AgentConsistencyChecks(ConsistencyChecks):
     @staticmethod
-    def max1(space: _AgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
+    def max1(space: _PositionalAgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
         caller = ConsistencyChecks._get_caller()
 
         if caller == "__setitem__":
@@ -933,7 +827,7 @@ class AgentConsistencyChecks(ConsistencyChecks):
         return True
 
     @staticmethod
-    def unique(space: _AgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
+    def unique(space: _PositionalAgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
         caller = ConsistencyChecks._get_caller()
 
         if caller == "__setitem__":
@@ -946,12 +840,11 @@ class AgentConsistencyChecks(ConsistencyChecks):
 # Need to create a e.g. Cartesian abstract class that is a space indexed by (x, y)???
 # class _Grid()...
 
-class Grid(_AgentSpace):
+class Grid(_PositionalAgentSpace):
     def __init__(self,
                 width: int, height: int, torus: bool,
-                metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric,
-                consistency_check: Callable[[_AgentSpace, GridCoordinate, Agent], bool] = AgentConsistencyChecks.max1):
-        super().__init__(metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
+                **kwargs):
+        super().__init__(**kwargs)
         self.width = width
         self.height = height
         self.torus = torus
@@ -1033,26 +926,25 @@ class Grid(_AgentSpace):
                 yield (x, y)
 
 
-class NetworkXMetric(BasicMetric):
+class NetworkXMetric(_Metric):
     @classmethod
     def distance(cls, node1: Position, node2: Position, space: _AbstractSpace) -> Distance:
         super(NetworkXMetric, cls).distance(node1, node2, space)
 
-        return nx.shortest_path_length(cast('NetworkX', space)._graph, node1, node2, weight="distance")
+        return nx.shortest_path_length(cast(PositionalAgentNetworkX, space)._graph, node1, node2, weight="distance")
 
     @classmethod
     def neighborhood(cls, root: Position, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Iterator[Position]:
         super(NetworkXMetric, cls).neighborhood(root, radius, space)
 
-        return ego_graph(cast('NetworkX', space)._graph, root, radius, center=include_center, distance="distance").nodes
+        return ego_graph(cast(PositionalAgentNetworkX, space)._graph, root, radius, center=include_center, distance="distance").nodes
 
 
-class NetworkX(_AgentSpace):
+class PositionalAgentNetworkX(_PositionalAgentSpace):
     def __init__(self,
                 graph: Optional[nx.Graph] = None,
-                metric: Union[_Metric, Type[_Metric]] = NetworkXMetric,
-                consistency_check: Callable[[_AgentSpace, Position, Agent], bool] = AgentConsistencyChecks.max1):
-        super().__init__(metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
+                **kwargs):
+        super().__init__(**kwargs)
         if graph is None:
             self._graph = nx.Graph()
         else:
@@ -1090,7 +982,7 @@ class NetworkX(_AgentSpace):
     def get_all_positions(self) -> Iterator[Position]:
         return self._graph.nodes
 
-    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], '_AbstractSpace']:
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         if pos not in self._graph:
             raise LookupError("'{}' is not part of the network graph".format(pos))
 
@@ -1143,7 +1035,7 @@ class NumpyPatchConsistencyChecks(ConsistencyChecks):
         return True
 
     @staticmethod
-    def get_arbitrary_max(max_vals: np.ndarray) -> Callable[['_NumpyPatchSpace', coord: Optional[GridCoordinate], value: Optional[Content]], Union[bool. np.ndarray]]:
+    def get_arbitrary_max(max_vals: np.ndarray) -> Callable[['_NumpyPatchSpace', Optional[GridCoordinate], Optional[Content]], Union[bool. np.ndarray]]:
         class _arbitrary_max:
             def __init__(self, max_vals: np.ndarray):
                 self.max_vals = max_vals
@@ -1167,7 +1059,7 @@ class NumpyPatchGrid(_PatchSpace):
     def __init__(self,
             init_val: np.ndarray, torus: bool,
             metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric,
-            consistency_check: Callable[[_NumpyPatchSpace, coord: Optional[GridCoordinate], value: Optional[Content]], Union[bool. np.ndarray]] = NumpyPatchConsistencyChecks.gteq0):
+            consistency_check: Callable[[_NumpyPatchSpace, Optional[GridCoordinate], Optional[Content]], Union[bool. np.ndarray]] = NumpyPatchConsistencyChecks.gteq0):
         super().__init__(metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
         self.torus = torus
         if init_val.ndim != 2:
