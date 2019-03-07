@@ -28,6 +28,8 @@ seeds consistent and allow for replication.
 """
 
 from collections import OrderedDict
+from mesa.agent import Agent
+from mesa.new_space import _PatchSpace
 
 
 class BaseScheduler:
@@ -45,6 +47,7 @@ class BaseScheduler:
         self.steps = 0
         self.time = 0
         self._agents = OrderedDict()
+        self._layers = set()
 
     def add(self, agent):
         """ Add an Agent object to the schedule.
@@ -54,7 +57,10 @@ class BaseScheduler:
             have a step() method.
 
         """
-        self._agents[agent.unique_id] = agent
+        if isinstance(agent, Agent):
+            self._agents[agent.unique_id] = agent
+        else:
+            self._layers.add(agent)
 
     def remove(self, agent):
         """ Remove all instances of a given agent from the schedule.
@@ -63,10 +69,16 @@ class BaseScheduler:
             agent: An agent object.
 
         """
-        del self._agents[agent.unique_id]
+        if isinstance(agent, Agent):
+            del self._agents[agent.unique_id]
+        else:
+            self._layers.remove(agent)
 
     def step(self):
         """ Execute the step of all the agents, one at a time. """
+        for layer in self._layers:
+            layer.step()
+
         for agent in self.agent_buffer(shuffled=False):
             agent.step()
         self.steps += 1
@@ -109,6 +121,9 @@ class RandomActivation(BaseScheduler):
         random order.
 
         """
+        for layer in self._layers:
+            layer.step()
+
         for agent in self.agent_buffer(shuffled=True):
             agent.step()
         self.steps += 1
@@ -125,6 +140,9 @@ class SimultaneousActivation(BaseScheduler):
     """
     def step(self):
         """ Step all agents, then advance them. """
+        for layer in self._layers:
+            layer.step()
+
         agent_keys = list(self._agents.keys())
         for agent_key in agent_keys:
             self._agents[agent_key].step()
@@ -168,6 +186,9 @@ class StagedActivation(BaseScheduler):
 
     def step(self):
         """ Executes all the stages for all agents. """
+        for layer in self._layers:
+            layer.step()
+
         agent_keys = list(self._agents.keys())
         if self.shuffle:
             self.model.random.shuffle(agent_keys)

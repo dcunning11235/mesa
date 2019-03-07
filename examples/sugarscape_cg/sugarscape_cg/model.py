@@ -18,6 +18,15 @@ import numpy as np
 from .agents import SsAgent
 
 
+class SugarPatchGrid(NumpyPatchGrid):
+    def __init__(self, max_values, **kwargs):
+        super().__init__(**kwargs)
+        self.max_values = max_values
+
+    def step(self):
+        super().step()
+        self._grid += 1
+        self._grid[self._grid > self.max_values] = self.max_values[self._grid > self.max_values]
 
 class SugarscapeCg(Model):
     '''
@@ -41,17 +50,14 @@ class SugarscapeCg(Model):
         self.initial_population = initial_population
 
         self.schedule = RandomActivation(self)
-        self.grid = LayeredSpace({"agents": Grid(self.height, self.width, torus=False),
-                                "sugar": NumpyPatchGrid(np.ones((self.height, self.width), int), torus=False)})
-        self.datacollector = DataCollector({"SsAgent": lambda m: m.schedule.get_breed_count(SsAgent), })
 
-        # Create sugar
-        sugar_distribution = np.genfromtxt("sugarscape_cg/sugar-map.txt")
-        for _, x, y in self.grid.coord_iter():
-            max_sugar = sugar_distribution[x, y]
-            sugar = Sugar((x, y), self, max_sugar)
-            self.grid.place_agent(sugar, (x, y))
-            self.schedule.add(sugar)
+        sugar_max_distribution = np.genfromtxt("sugarscape_cg/sugar-map.txt")
+        sugar_patches = SugarPatchGrid(sugar_max_distribution, torus=False)
+        self.grid = LayeredSpace({"agents": Grid(height=self.height, width=self.width, torus=False),
+                                "sugar": sugar_patches})
+        self.schedule.add(sugar_patches)
+
+        self.datacollector = DataCollector({"SsAgent": lambda m: m.schedule.get_agent_count(), })
 
         # Create agent:
         for i in range(self.initial_population):

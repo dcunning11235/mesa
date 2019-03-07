@@ -162,11 +162,8 @@ class _AbstractSpace(ABC):
 
 class _PositionalSpace(_AbstractSpace):
     @abstractmethod
-    def __init__(self,
-                consistency_check: Callable[[_PositionalSpace, Position, Content], bool] = None,
-                **kwargs) -> None:
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.consistency_check = consistency_check
 
     @property
     @abstractmethod
@@ -181,7 +178,7 @@ class _PositionalSpace(_AbstractSpace):
         intializes a point/cell/etc. such as set(), 0, None, etc."""
 
     @abstractmethod
-    def reduce_position(self, pos: Position) -> Position:
+    def reduce_position(self, pos_or_content: Union[Position, Content]) -> Position:
         """In cases where coordinate systems can have multiple Position values
         that refer to the same position, reduce_position should return the
         canonical value for a passed position, possibly raising an exception if
@@ -242,11 +239,8 @@ class _PositionalSpace(_AbstractSpace):
 
 class _SocialSpace(_AbstractSpace):
     @abstractmethod
-    def __init__(self,
-                consistency_check: Callable[[_SocialSpace, Content], bool] = None,
-                **kwargs) -> None:
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.consistency_check = consistency_check
 
 
 class _PositionalAgentSpace(_PositionalSpace):
@@ -711,59 +705,6 @@ class ChebyshevGridMetric(_Metric):
                     yield (center[0]+x, center[1]+y)
 
 
-class ConsistencyChecks:
-    warn_flag = False
-
-    @staticmethod
-    def _get_caller() -> str:
-        func_name = ""
-        try:
-            func_name = sys._getframe(2).f_code.co_name
-        except:
-            if not ConsistencyChecks.warn_flag:
-                ConsistencyChecks.warn_flag = True
-                raise ResourceWarning("sys._getframe(2).f_code.co_name is unavailable, using much slower inspect.stack()!")
-            func_name = stack()[2].function
-
-        if func_name == "":
-            raise ValueError("Unable to get source method name for GridConsistencyChecks")
-
-        return func_name
-
-    @staticmethod
-    def stack_checks(checks: Iterator[Callable[[_AbstractSpace, Position, Content], bool]]) -> Callable[[_AbstractSpace, Position, Content], bool]:
-        def _check_stacker(space: _AbstractSpace, pos: Position, content: Content):
-            for check in checks:
-                if check(space, pos, content):
-                    continue
-                return False
-
-        return _check_stacker
-
-
-class AgentConsistencyChecks(ConsistencyChecks):
-    @staticmethod
-    def max1(space: _PositionalAgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
-        caller = ConsistencyChecks._get_caller()
-
-        if caller == "__setitem__":
-            val = space[coord]
-            if isinstance(val, collections.Iterator):
-                return not len(list(val))
-
-        return True
-
-    @staticmethod
-    def unique(space: _PositionalAgentSpace, coord: GridCoordinate, agent: Agent) -> bool:
-        caller = ConsistencyChecks._get_caller()
-
-        if caller == "__setitem__":
-            val = space[coord]
-            if isinstance(val, collections.Iterator):
-                return type(agent) not in map(type, space[coord])
-
-        return True
-
 # Need to create a e.g. Cartesian abstract class that is a space indexed by (x, y)???
 # class _Grid()...
 class _Grid(_PositionalSpace):
@@ -775,8 +716,8 @@ class _Grid(_PositionalSpace):
         self.height = height
         self.torus = torus
 
-    def reduce_position(self, pos: Position, raise_exception: bool = True) -> Position:
-        pos = cast(GridCoordinate, pos)
+    def reduce_position(self, pos_or_content: Union[Position, Content], raise_exception: bool = True) -> Position:
+        pos = cast(GridCoordinate, pos_or_content)
         if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
             return pos
         elif self.torus:
@@ -941,27 +882,11 @@ class PositionalAgentNetworkX(_PositionalAgentSpace):
     def __iter__(self) -> Iterator[Union[Position, Content]]:
         return iter(self._graph.nodes)
 
-    def reduce_position(self, pos: Position) -> Position:
-        if pos not in self._graph:
-            raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+    def reduce_position(self, pos_or_content: Union[Position, Content]) -> Position:
+        if pos_or_content not in self._graph:
+            raise LookupError("'{}' is not a part of the graph".format(pos_or_content))
 
-        return pos
-
-
-class NumpyPatchConsistencyChecks(ConsistencyChecks):
-    @staticmethod
-    def gteq0(space: NumpyPatchGrid, coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool, np.ndarray]:
-        if coord is None:
-            return space._grid >= 0
-
-        caller = ConsistencyChecks._get_caller()
-        if caller == "__setitem__":
-            if value is not None:
-                return value >= 0
-            else:
-                return False
-
-        return True
+        return pos_or_content
 
 
 # An altrnative path would be to have NumpyPatchGrid actually extend numpy.ndarray
@@ -1040,16 +965,9 @@ class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
 
     def __setitem__(self, pos: GridCoordinate, content: Content) -> None:
         pos = cast(GridCoordinate, self.reduce_position(pos))
-
-        if self.consistency_check is not None and self.consistency_check(self, pos, content):
-            self._grid[pos] = content
-        else:
-            raise ValueError("Cannot set value {} to position {}, failed consistency check {}".format(content, pos, self.consistency_check))
+        self._grid[pos] = content
 
     def __delitem__(self, pos: GridCoordinate) -> None:
         pos = cast(GridCoordinate, self.reduce_position(pos))
 
-        if self.consistency_check is not None and self.consistency_check(self, pos, self.default_value):
-            self._grid[pos] = self.default_value
-        else:
-            raise ValueError("Cannot delete value {} at position {}, failed consistency check {}".format(self._grid[pos], pos, self.consistency_check))
+        self._grid[pos] = self.default_value
