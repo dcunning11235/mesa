@@ -1024,7 +1024,7 @@ class PositionalAgentNetworkX(_PositionalAgentSpace):
 
 class NumpyPatchConsistencyChecks(ConsistencyChecks):
     @staticmethod
-    def gteq0(space: '_NumpyPatchSpace', coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool. np.ndarray]:
+    def gteq0(space: NumpyPatchGrid, coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool. np.ndarray]:
         if coord is None:
             return space._grid >= 0
 
@@ -1035,12 +1035,12 @@ class NumpyPatchConsistencyChecks(ConsistencyChecks):
         return True
 
     @staticmethod
-    def get_arbitrary_max(max_vals: np.ndarray) -> Callable[['_NumpyPatchSpace', Optional[GridCoordinate], Optional[Content]], Union[bool. np.ndarray]]:
+    def get_arbitrary_max(max_vals: np.ndarray) -> Callable[[NumpyPatchGrid, Optional[GridCoordinate], Optional[Content]], Union[bool. np.ndarray]]:
         class _arbitrary_max:
             def __init__(self, max_vals: np.ndarray):
                 self.max_vals = max_vals
 
-            def lteq_arb(space: '_NumpyPatchSpace', coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool. np.ndarray]:
+            def lteq_arb(space: NumpyPatchGrid, coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool. np.ndarray]:
                 if coord is None:
                     return space._grid <= self.max_vals
 
@@ -1055,19 +1055,16 @@ class NumpyPatchConsistencyChecks(ConsistencyChecks):
 # doesn't save work.  Worse, would have to disable e.g. being able to reshape,
 # in-place sort, and changing of various lower-level flags etc.  But it would be
 # neat if we just extended it...
-class NumpyPatchGrid(_PatchSpace):
-    def __init__(self,
-            init_val: np.ndarray, torus: bool,
-            metric: Union[_Metric, Type[_Metric]] = ChebyshevGridMetric,
-            consistency_check: Callable[[_NumpyPatchSpace, Optional[GridCoordinate], Optional[Content]], Union[bool. np.ndarray]] = NumpyPatchConsistencyChecks.gteq0):
-        super().__init__(metric, cast(Callable[[_AbstractSpace, Position, Content], bool], consistency_check))
+class NumpyPatchGrid(_PositionalPatchSpace):
+    def __init__(self, init_val: np.ndarray, torus: bool, **kwargs):
+        super().__init__(**kwargs)
         self.torus = torus
         if init_val.ndim != 2:
             raise TypeError("NumericPatchGrid may only be initilialized with a ndarray of dimension 2")
         self._grid = np.array(init_val)  # We don't need no stinkin' matrices here
         self.height, self.width = self._grid.shape
 
-    def _verify_other(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> Union[np.ndarray, int, float]:
+    def _verify_other(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> Union[np.ndarray, int, float]:
         if isinstance(other, NumpyPatchGrid) or isinstance(other, np.ndarray):
             if isinstance(other, NumpyPatchGrid):
                 ret = other._grid
@@ -1081,49 +1078,38 @@ class NumpyPatchGrid(_PatchSpace):
 
         return ret
 
-    def __iadd__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+    def __iadd__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
         self._grid += self._verify_other(other)
         return self
 
-    def __isub__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+    def __isub__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
         self._grid -= self._verify_other(other)
         return self
 
-    def __imul__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+    def __imul__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
         self._grid *= self._verify_other(other)
         return self
 
-    def __itruediv__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+    def __itruediv__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
         self._grid /= self._verify_other(other)
         return self
 
-    def __ipow__(self, other: Union['NumpyPatchGrid', np.ndarray, int, float]) -> 'NumpyPatchGrid':
+    def __ipow__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
         self._grid **= self._verify_other(other)
         return self
 
-    @property
-    def is_continuous(self) -> bool:
-        return False
+    def __ipow__(self, other: Any) -> _PatchSpace:
+        """Element-by-element power of values of one _PatchSpace by another
+        _PatchSpace, scalar, etc."""
 
-    # ####Exactly the same as Grid!!!!
-    def _verify_coord(self, pos: GridCoordinate, raise_exception: bool = True) -> Optional[GridCoordinate]:
-        if 0 <= pos[0] <= self.width and 0 <= pos[1] < self.height:
-            return pos
-        elif self.torus:
-            return (pos[0] % self.width, pos[1] % self.height)
-        elif raise_exception:
-            raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+    def __iand__(self, other: Any) -> _PatchSpace:
+        """And values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
-        return None
+    def __ior__(self, other: Any) -> _PatchSpace:
+        """Or values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
 
-    def __contains__(self, pos: GridCoordinate) -> bool:
-        return self._verify_coord(pos, False) is not None
+    def __ixor__(self, other: Any) -> _PatchSpace:
 
-    # ####Exactly the same as Grid!!!!
-    def get_all_positions(self) -> Iterator[GridCoordinate]:
-        for y in range(self.height):
-            for x in range(self.width):
-                yield (x, y)
 
     def __getitem__(self, pos: GridCoordinate) -> Content:
         return self._grid[self._verify_coord(pos)]
@@ -1143,15 +1129,3 @@ class NumpyPatchGrid(_PatchSpace):
             self._grid[pos] = self.default_value
         else:
             raise ValueError("Cannot delete value {} at position {}, failed consistency check {}".format(self._grid[pos], pos, self.consistency_check))
-
-    # ####Exactly the same as Grid!!!!
-    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[GridCoordinate]:
-        if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
-            for n in cast(Iterator[Position], self.metric.neighborhood(pos, radius, self, include_center)):
-                if 0 <= n[0] < self.width and 0 <= n[1] < self.height:
-                    yield n
-        else:
-            raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
-
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Content]]:
-        return map(lambda pos: (pos, self._grid[pos]), self.neighborhood_at(pos, radius, include_center))
