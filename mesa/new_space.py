@@ -180,6 +180,14 @@ class _PositionalSpace(_AbstractSpace):
         intializes a point/cell/etc. such as set(), 0, None, etc."""
 
     @abstractmethod
+    def reduce_position(self, pos: Position, raise_exception: bool = True) -> Optional[Position]:
+        """In cases where coordinate systems can have multiple Position values
+        refer to the same position, reduce_position should return the canonical
+        value for a passed position, possible raising an exception if the value
+        cannot be so reduced.  E.g. for a 10x10 torus, (2, 1) and (12, 1) are the
+        same point and (presumably) (2, 1) is the canonical form."""
+
+    @abstractmethod
     def content(self) -> Iterator[Content]:
         """Returns an Iterator that gives all content, flattened if e.g. multiple
         items are stored at each location."""
@@ -252,7 +260,7 @@ class _PositionalAgentSpace(_PositionalSpace):
     def place_agent(self, pos: Position, agent: Agent) -> None:
         """Place an agent at a specific position."""
         self[pos] = agent
-        self._agent_to_pos[agent] = pos
+        self._agent_to_pos[agent] = self.reduce_position(pos)
 
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
@@ -709,7 +717,7 @@ class EuclidianGridMetric(_Metric):
         # This is ugly and inefficient, but this will grind out the needed result
         for y in range(-int(radius), int(radius)+1):
             for x in range(-int(radius), int(radius)+1):
-                if cls.distance((0, 0), (x, y), space) <= radius and (include_center or (x != 0 and y != 0)):
+                if cls.distance((0, 0), (x, y), space) <= radius and (include_center or (x != 0 and y != 0)) and (center[0]+x, center[1]+y) in space:
                     yield (center[0]+x, center[1]+y)
 
 
@@ -730,7 +738,7 @@ class ManhattanGridMetric(_Metric):
 
         for y in range(-int(radius), int(radius)+1):
             for x in range(abs(y)-int(radius), int(radius)-abs(y)+1):
-                if include_center or (x != 0 and y != 0):
+                if include_center or (x != 0 and y != 0) and (center[0]+x, center[1]+y) in space:
                     yield (center[0]+x, center[1]+y)
 
 
@@ -753,7 +761,7 @@ class ChebyshevGridMetric(_Metric):
         for y in range(-int(radius), int(radius)+1):
             for x in range(-int(radius), int(radius)+1):
                 print("Evaluating ({}, {})".format(x,y))
-                if include_center or (x != 0 and y != 0):
+                if include_center or (x != 0 and y != 0) and (center[0]+x, center[1]+y) in space:
                     yield (center[0]+x, center[1]+y)
 
 
@@ -821,8 +829,9 @@ class _Grid(_PositionalSpace):
         self.height = height
         self.torus = torus
 
-    def _verify_coord(self, pos: GridCoordinate, raise_exception: bool = True) -> Optional[GridCoordinate]:
-        if 0 <= pos[0] <= self.width and 0 <= pos[1] < self.height:
+    def reduce_position(self, pos: Position, raise_exception: bool = True) -> Optional[Position]:
+        pos = cast(GridCoordinate, pos)
+        if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
             return pos
         elif self.torus:
             return (pos[0] % self.width, pos[1] % self.height)
@@ -845,10 +854,10 @@ class Grid(_PositionalAgentSpace, _Grid):
         return False
 
     def __getitem__(self, pos: GridCoordinate) -> set:
-        return self._grid.get(cast(GridCoordinate, self._verify_coord(pos)), self.default_value)
+        return self._grid.get(cast(GridCoordinate, self.reduce_position(pos)), self.default_value)
 
     def __setitem__(self, pos: GridCoordinate, agent: Agent) -> None:
-        pos = cast(GridCoordinate, self._verify_coord(pos))
+        pos = cast(GridCoordinate, self.reduce_position(pos))
         try:
             self._grid[pos].add(agent)
         except KeyError:
@@ -856,15 +865,15 @@ class Grid(_PositionalAgentSpace, _Grid):
 
 
     def __delitem__(self, pos_or_content: Union[GridCoordinate, Agent]) -> None:
-        if isinstance(pos_or_content, tuple):
-            pos = cast(GridCoordinate, self._verify_coord(pos))
+        if not isinstance(pos_or_content, Agent):
+            pos = cast(GridCoordinate, self.reduce_position(pos))
             self._grid[pos].clear()
         else:
             self._grid[self._agent_to_pos[pos_or_content]].remove(pos_or_content)
 
     def __contains__(self, pos_or_content: Union[GridCoordinate, Agent]) -> bool:
-        if isinstance(pos_or_content, tuple):
-            return self._verify_coord(pos_or_content, False) is not None
+        if not isinstance(pos_or_content, Agent):
+            return self.reduce_position(pos_or_content, False) is not None
         else:
             return pos_or_content in self._agent_to_pos
 
@@ -889,7 +898,7 @@ class Grid(_PositionalAgentSpace, _Grid):
         print("Getting neighbors for: {}".format(pos_or_content))
 
         if not isinstance(pos_or_content, Agent):
-            pos = cast(GridCoordinate, self._verify_coord(pos_or_content))
+            pos = cast(GridCoordinate, self.reduce_position(pos_or_content))
             print("Not an Agent, getting metric {}'s' neighborhood for {}".format(self.metric, pos))
             print("Going to return: {}".format(list(cast(Iterator[GridCoordinate], self.metric.neighborhood(pos, radius, self, include_pos_or_content)))))
 
@@ -1090,7 +1099,7 @@ class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
         return self._grid[pos]
 
     def __setitem__(self, pos: GridCoordinate, content: Content) -> None:
-        pos = cast(GridCoordinate, self._verify_coord(pos))
+        pos = cast(GridCoordinate, self.reduce_position(pos))
 
         if self.consistency_check is not None and self.consistency_check(self, pos, content):
             self._grid[pos] = content
@@ -1098,7 +1107,7 @@ class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
             raise ValueError("Cannot set value {} to position {}, failed consistency check {}".format(content, pos, self.consistency_check))
 
     def __delitem__(self, pos: GridCoordinate) -> None:
-        pos = cast(GridCoordinate, self._verify_coord(pos))
+        pos = cast(GridCoordinate, self.reduce_position(pos))
 
         if self.consistency_check is not None and self.consistency_check(self, pos, self.default_value):
             self._grid[pos] = self.default_value
