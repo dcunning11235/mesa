@@ -36,7 +36,6 @@ class BoltzmannWealthModel(Model):
             x = self.random.randrange(self.grid.width)
             y = self.random.randrange(self.grid.height)
             self.grid.place_agent((x, y), a)
-        print("Agents placed: {}".format(self.grid._agent_to_pos))
 
         self.running = True
         self.datacollector.collect(self)
@@ -58,8 +57,7 @@ class MoneyAgent(Agent):
         self.wealth = 1
 
     def move(self):
-        print("Tring to get neighborhood of {}".format(self))
-        possible_steps = list(self.model.grid.neighborhood_of(self, include_self=False))
+        possible_steps = list(self.model.grid.neighborhood_of(self, include_center=False))
         new_position = self.random.choice(possible_steps)
         self.model.grid.move_agent(new_position, self)
 

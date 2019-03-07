@@ -3,7 +3,7 @@ from mesa.time import RandomActivation
 from mesa.datacollection import DataCollector
 import networkx as nx
 
-from mesa.new_space import NetworkX
+from mesa.new_space import PositionalAgentNetworkX
 
 
 def compute_gini(model):
@@ -22,7 +22,7 @@ class BoltzmannWealthModelNetwork(Model):
         self.num_agents = num_agents
         self.num_nodes = num_nodes if num_nodes >= self.num_agents else self.num_agents
         self.G = nx.erdos_renyi_graph(n=self.num_nodes, p=0.5)
-        self.grid = NetworkX(self.G)
+        self.grid = PositionalAgentNetworkX(self.G)
         self.schedule = RandomActivation(self)
         self.datacollector = DataCollector(
             model_reporters={"Gini": compute_gini},
@@ -66,7 +66,7 @@ class MoneyAgent(Agent):
             self.model.grid.move_agent(new_position, self)
 
     def give_money(self):
-        neighbors = [a for pos, a in self.model.grid.neighbors_of(self, include_center=False)]
+        neighbors = [a for pos, a in self.model.grid.neighbors_of(self, include_self=False)]
         if len(neighbors) > 0:
             other = self.random.choice(neighbors)
             other.wealth += 1
