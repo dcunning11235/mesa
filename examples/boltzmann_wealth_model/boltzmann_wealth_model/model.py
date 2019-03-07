@@ -20,9 +20,9 @@ class BoltzmannWealthModel(Model):
     highly skewed distribution of wealth.
     """
 
-    def __init__(self, N=100, width=10, height=10):
+    def __init__(self, N=10, width=10, height=10):
         self.num_agents = N
-        self.grid = Grid(height, width, True)
+        self.grid = Grid(height=height, width=width, torus=True)
         self.schedule = RandomActivation(self)
         self.datacollector = DataCollector(
             model_reporters={"Gini": compute_gini},
@@ -36,6 +36,7 @@ class BoltzmannWealthModel(Model):
             x = self.random.randrange(self.grid.width)
             y = self.random.randrange(self.grid.height)
             self.grid.place_agent((x, y), a)
+        print("Agents placed: {}".format(self.grid._agent_to_pos))
 
         self.running = True
         self.datacollector.collect(self)
@@ -57,7 +58,8 @@ class MoneyAgent(Agent):
         self.wealth = 1
 
     def move(self):
-        possible_steps = list(self.model.grid.neighborhood_of(self, include_center=False))
+        print("Tring to get neighborhood of {}".format(self))
+        possible_steps = list(self.model.grid.neighborhood_of(self, include_self=False))
         new_position = self.random.choice(possible_steps)
         self.model.grid.move_agent(new_position, self)
 
@@ -66,7 +68,7 @@ class MoneyAgent(Agent):
         # Alternatively:
         # cellmates = self.model.grid.agents_at(self.model.grid.find_agent(self))
         if len(cellmates) > 1:
-            other = self.random.choice(cellmates)[1] # Now returns Iterator[(pos, agent)]
+            other = self.random.choice(cellmates) # Now returns Iterator[(pos, agent)]
             other.wealth += 1
             self.wealth -= 1
 

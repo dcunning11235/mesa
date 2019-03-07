@@ -21,6 +21,10 @@ Content = Any
 Distance = Union[int, float]
 
 GridCoordinate = Tuple[int, int]
+#class GridCoordinate(NamedTuple):
+#    x: int
+#    y: int
+
 ContinuousCoordinate = Tuple[float, float]
 
 class LayeredPosition(NamedTuple):
@@ -80,10 +84,9 @@ class _Metric(ABC):
     def distance(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Distance:
         """Returns the distance (int or real) bewteen two positions or raises an
         exception if no such distance exists"""
-        if pos1 not in space:
-            raise LookupError("path_length failed because '{}' is not in space {}".format(pos1, space))
-        if pos2 not in space:
-            raise LookupError("path_length failed because '{}' is not in space {}".format(pos2, space))
+        for pos in (pos1, pos2):
+            if pos not in space:
+                raise LookupError("distance failed because '{}' is not in space {}".format(pos, space))
 
         return 0
 
@@ -120,8 +123,10 @@ class _Metric(ABC):
         iterator of Position's if a discreet space, or a (sub)_AbstractSpace if
         continuous, or None if no neighborhood can be found (e.g. the `center`
         is invalid.)"""
+        print("_Metric.neighborhood called")
+
         if center not in space:
-            raise LookupError("path_length failed because '{}' is not in space {}".format(center, space))
+            raise LookupError("neighborhood failed because '{}' is not in space {}".format(center, space))
 
         return iter([])
 
@@ -149,7 +154,7 @@ class _AbstractSpace(ABC):
         """Returns an iterator over all keys (positions or content)"""
 
     @abstractmethod
-    def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Content]:
+    def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Union[Content, Position]]:
         """Yield the neighbors in proximity to a position or content, possible including those
         at the passed position."""
 
@@ -207,24 +212,24 @@ class _PositionalSpace(_AbstractSpace):
         an appropriate exception for e.g. out-of-bounds positions."""
 
     @abstractmethod
-    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
+    def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood at a position, either an iterator over the
         keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
 
     @abstractmethod
-    def neighborhood_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
+    def neighborhood_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood around some content, either an iterator
         over the keys or an _AbstractSpace containing only the subspace of the
         neighborhood."""
 
     @abstractmethod
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Content]:
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Content]:
         """Yield the neighbors at/around a position as an iterator over the
         neighbors."""
 
     @abstractmethod
-    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Content]:
+    def neighbors_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Iterator[Content]:
         """Yield the neighbors around some content as an iterator over the
         neighbors."""
 
@@ -247,10 +252,12 @@ class _PositionalAgentSpace(_PositionalSpace):
     def place_agent(self, pos: Position, agent: Agent) -> None:
         """Place an agent at a specific position."""
         self[pos] = agent
+        self._agent_to_pos[agent] = pos
 
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
         del self[agent]
+        self._agent_to_pos[agent]
 
     def move_agent(self, pos: Position, agent: Agent) -> None:
         """Move an agent from its current to a new position."""
@@ -259,6 +266,7 @@ class _PositionalAgentSpace(_PositionalSpace):
 
     def find_agent(self, agent: Agent) -> Optional[Position]:
         """Return where an agent is (its Position) within the space."""
+        print("Trying to find {} in {}".format(agent, self._agent_to_pos))
         return self._agent_to_pos.get(agent, None)
 
     def agents_at(self, pos: Position) -> Iterator[Agent]:
@@ -266,18 +274,14 @@ class _PositionalAgentSpace(_PositionalSpace):
         radius=0)."""
         return self.neighbors_at(pos, 0, True)
 
-    @abstractmethod
     def count_agents_at(self, pos: Position) -> int:
-        """Yield the neighbors at a given position (i.e. neighnors_at, but with
-        radius=0)."""
+        return len(list(self.agents_at(pos)))
 
-    @abstractmethod
     def content(self) -> Iterator[Content]:
         """Returns an Iterator that gives all content, flattened if e.g. multiple
         items are stored at each location."""
         return iter(self._agent_to_pos.keys())
 
-    @abstractmethod
     def all(self) -> Iterator[Tuple[Position, Content]]:
         """Returns an Iterator that gives all (Position, Content) tuples, flattened
         if e.g. multiple items are stored at each location."""
@@ -296,13 +300,17 @@ class _PositionalAgentSpace(_PositionalSpace):
         # Technically there is a bug here... if continuous and multi-agent, no way
         # currently to return that... Just resturns the ball, including central
         # point, hence including `self`
-        if self.is_continuous or include_self:
-            return self.neighbors(self.find_agent(content), radius, True)
-
         self_pos = self.find_agent(content)
-        for a in self.neighbors(self.find_agent(content), radius, True):
-            if self_pos != a:
-                yield a
+        print("Got self_pos of: {}".format(self_pos))
+
+        if self.is_continuous or include_self:
+            print("Returning neighborhood of: {}".format(list(self.neighbors(self_pos, radius, True))))
+            return self.neighbors(self_pos, radius, True)
+
+        print("Returning neighborhood of {} minus {}".format(list(self.neighbors(self_pos, radius, True)), self_pos))
+        for npos in self.neighbors(self_pos, radius, True):
+            if self_pos != npos:
+                yield npos
 
     def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Content]:
         """Yield the neighborhood at a position or content, either an iterator
@@ -471,7 +479,6 @@ class _PatchSpace(_AbstractSpace):
     def neighbors(self, pos_or_content: Union[Position, Content], radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Union[Position, Content]]:
         """Yield the neighbors in proximity to a position or content, in this case
         the patch values, possibly including those at the passed position."""
-        return self.base_space.neighbors(pos_or_content, radius, include_pos_or_content)
 
 
 class _PositionalPatchSpace(_PositionalSpace, _PatchSpace):
@@ -496,13 +503,13 @@ class _PositionalPatchSpace(_PositionalSpace, _PatchSpace):
         return cast(_PositionalSpace, self.base_space).neighborhood_of(content, radius, include_self)
 
     @abstractmethod
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Tuple[Position, Content]]:
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Content]]:
         """Yield the patch neighbors at/around a position as an iterator over the
         neighbors.  Note that since patches may (likely) be simple types e.g.
         int's, the iterator is over (Positon, Content) tuples. """
 
     @abstractmethod
-    def neighbors_of(self, content: Content, radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Tuple[Position, Content]]:
+    def neighbors_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Iterator[Tuple[Position, Content]]:
         """Yield the patch neighbors around some content *in the underlying
         self.base_space* as an iterator over the neighbors.  Note that since
         patches may (likely) be simple types e.g. int's, the iterator is over
@@ -673,13 +680,15 @@ class LayeredSpace(_PositionalAgentSpace):
         else:
             return chain(*[l.neighbors_at(pos, radius, include_center) for l in self.layers.values() if isinstance(l, _PositionalAgentSpace)])
 
-    def neighbors_of(self, agent: Agent, radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Agent]]:
+    def neighbors_of(self, agent: Agent, radius: Distance = 1, include_self: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the neighbors of an agent."""
-        return cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).neighbors_of(agent, radius, include_center)
+        return cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).neighbors_of(agent, radius, include_self)
 
-    def neighborhood_of(self, agent: Agent, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
+    def neighborhood_of(self, agent: Agent, radius: Distance = 1, include_self: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood of an agent."""
-        return cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_center)
+        return cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_self)
+
+    #No neighborhood_at????? CHECK
 
 
 class EuclidianGridMetric(_Metric):
@@ -738,10 +747,12 @@ class ChebyshevGridMetric(_Metric):
 
     @classmethod
     def neighborhood(cls, center: GridCoordinate, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Iterator[Position]:
+        print("Checbyshev center point of {} with radius {}".format(center, radius))
         super(ChebyshevGridMetric, cls).neighborhood(center, radius, space)
 
         for y in range(-int(radius), int(radius)+1):
             for x in range(-int(radius), int(radius)+1):
+                print("Evaluating ({}, {})".format(x,y))
                 if include_center or (x != 0 and y != 0):
                     yield (center[0]+x, center[1]+y)
 
@@ -803,6 +814,8 @@ class AgentConsistencyChecks(ConsistencyChecks):
 # class _Grid()...
 class _Grid(_PositionalSpace):
     def __init__(self, width: int, height: int, torus: bool, **kwargs):
+        if "metric" not in kwargs:
+            kwargs["metric"] = ChebyshevGridMetric
         super().__init__(**kwargs)
         self.width = width
         self.height = height
@@ -836,26 +849,18 @@ class Grid(_PositionalAgentSpace, _Grid):
 
     def __setitem__(self, pos: GridCoordinate, agent: Agent) -> None:
         pos = cast(GridCoordinate, self._verify_coord(pos))
+        try:
+            self._grid[pos].add(agent)
+        except KeyError:
+            self._grid[pos] = set([agent, ])
 
-        if self.consistency_check is not None and self.consistency_check(self, pos, agent):
-            try:
-                self._grid[pos].add(agent)
-                self._agent_to_pos[agent] = pos
-            except KeyError:
-                self._grid[pos] = set([agent, ])
-                self._agent_to_pos[agent] = pos
-        else:
-            raise ValueError("Cannot add agent {} to position {}, failed consistency check {}".format(agent, pos, self.consistency_check))
 
     def __delitem__(self, pos_or_content: Union[GridCoordinate, Agent]) -> None:
         if isinstance(pos_or_content, tuple):
             pos = cast(GridCoordinate, self._verify_coord(pos))
-            for a in self._grid[pos]:
-                del self._agent_to_pos[a]
             self._grid[pos].clear()
         else:
             self._grid[self._agent_to_pos[pos_or_content]].remove(pos_or_content)
-            del self._agent_to_pos[pos_or_content]
 
     def __contains__(self, pos_or_content: Union[GridCoordinate, Agent]) -> bool:
         if isinstance(pos_or_content, tuple):
@@ -869,24 +874,33 @@ class Grid(_PositionalAgentSpace, _Grid):
 
         raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
 
-    def neighborhood_at(self, pos: GridCoordinate, radius: Distance = 1, include_center: bool = True) -> Iterator[GridCoordinate]:
-        pos = cast(GridCoordinate, self._verify_coord(pos))
-
-        return cast(Iterator[GridCoordinate], self.metric.neighborhood(pos, radius, self, include_center))
-
     def agents_at(self, pos: Position) -> Iterator[Agent]:
         return iter(self[pos])
 
     def count_agents_at(self, pos: Position) -> int:
         return len(self[pos])
 
-    def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[GridCoordinate, Agent]]:
-        return chain(*[map(lambda a: (pos, a), self.agents_at(pos)) for n in self.neighborhood_at(pos, radius, include_center)])
-
-    def get_all_positions(self) -> Iterator[Position]:
+    def __iter__(self) -> Iterator[Union[Position, Content]]:
         for y in range(self.height):
             for x in range(self.width):
                 yield (x, y)
+
+    def neighbors(self, pos_or_content: Union[GridCoordinate, Agent], radius: Distance = 1, include_pos_or_content: bool = True) -> Iterator[Union[Content, Position]]:
+        print("Getting neighbors for: {}".format(pos_or_content))
+
+        if not isinstance(pos_or_content, Agent):
+            pos = cast(GridCoordinate, self._verify_coord(pos_or_content))
+            print("Not an Agent, getting metric {}'s' neighborhood for {}".format(self.metric, pos))
+            print("Going to return: {}".format(list(cast(Iterator[GridCoordinate], self.metric.neighborhood(pos, radius, self, include_pos_or_content)))))
+
+            return cast(Iterator[GridCoordinate], self.metric.neighborhood(pos, radius, self, include_pos_or_content))
+        else:
+            pos = cast(GridCoordinate, self.find_agent(pos_or_content))
+            ret = chain(*[self.agents_at(npos) for npos in cast(Iterator[GridCoordinate], self.metric.neighborhood(pos, radius, self, True))])
+            if include_pos_or_content:
+                return ret
+            else:
+                return filter(lambda a: a != pos_or_content, ret)
 
 
 class NetworkXMetric(_Metric):
