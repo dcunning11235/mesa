@@ -483,44 +483,6 @@ class _PositionalPatchSpace(_PositionalSpace, _PatchSpace):
     def is_continuous(self) -> bool:
         return cast(_PositionalSpace, self.base_space).is_continuous
 
-    @property
-    def default_value(self) -> Optional[Content]:
-        """Return whether the default value of the space.  For subclasses where
-        __missing__ is called (or are infinite) this should be the value that
-        intializes a point/cell/etc. such as set(), 0, None, etc."""
-
-    @abstractmethod
-    def content(self) -> Iterator[Content]:
-        """Returns an Iterator that gives all content, flattened if e.g. multiple
-        items are stored at each location."""
-
-    @abstractmethod
-    def all(self) -> Iterator[Tuple[Position, Optional[Content]]]:
-        """Returns an Iterator that gives all (Position, Content) tuples, flattened
-        if e.g. multiple items are stored at each location."""
-
-    @abstractmethod
-    def __getitem__(self, pos: Position) -> Optional[Content]:
-        """Return the content at a position, or an iterator over such.
-        Called by `_AbstractSpace()[pos]`."""
-
-    @abstractmethod
-    def __setitem__(self, pos: Position, content: Optional[Content]) -> None:
-        """*Sets or adds* the content at a position.
-        Called by `_AbstractSpace()[pos] = content`."""
-
-    @abstractmethod
-    def __delitem__(self, pos: Position) -> None:
-        """Delete content or value at a position.  This should *not* remove the
-        position itself (e.g. unlike `del dict[key]`).  E.g. a Grid implementation
-        should should still return some 'empty' value for coordinates that are
-        in-bounds.  See `__missing__`."""
-
-    @abstractmethod
-    def __missing__(self, pos: Position) -> Optional[Content]:
-        """Handle missing positions.  Used for e.g. lazy filling.  Should raise
-        an appropriate exception for e.g. out-of-bounds positions."""
-
     def neighborhood_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood at a position, either an iterator over the
         keys or an _AbstractSpace containing only the subspace of the
@@ -839,24 +801,12 @@ class AgentConsistencyChecks(ConsistencyChecks):
 
 # Need to create a e.g. Cartesian abstract class that is a space indexed by (x, y)???
 # class _Grid()...
-
-class Grid(_PositionalAgentSpace):
-    def __init__(self,
-                width: int, height: int, torus: bool,
-                **kwargs):
+class _Grid(_PositionalSpace):
+    def __init__(self, width: int, height: int, torus: bool, **kwargs):
         super().__init__(**kwargs)
         self.width = width
         self.height = height
         self.torus = torus
-        self._grid: Dict[GridCoordinate, Set] = dict()
-
-    @property
-    def default_value(self) -> Set:
-        return set()
-
-    @property
-    def is_continuous(self) -> bool:
-        return False
 
     def _verify_coord(self, pos: GridCoordinate, raise_exception: bool = True) -> Optional[GridCoordinate]:
         if 0 <= pos[0] <= self.width and 0 <= pos[1] < self.height:
@@ -867,6 +817,19 @@ class Grid(_PositionalAgentSpace):
             raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
 
         return None
+
+class Grid(_PositionalAgentSpace, _Grid):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._grid: Dict[GridCoordinate, Set] = dict()
+
+    @property
+    def default_value(self) -> Set:
+        return set()
+
+    @property
+    def is_continuous(self) -> bool:
+        return False
 
     def __getitem__(self, pos: GridCoordinate) -> set:
         return self._grid.get(cast(GridCoordinate, self._verify_coord(pos)), self.default_value)
@@ -1024,30 +987,19 @@ class PositionalAgentNetworkX(_PositionalAgentSpace):
 
 class NumpyPatchConsistencyChecks(ConsistencyChecks):
     @staticmethod
-    def gteq0(space: NumpyPatchGrid, coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool. np.ndarray]:
+    def gteq0(space: NumpyPatchGrid, coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool, np.ndarray]:
         if coord is None:
             return space._grid >= 0
 
         caller = ConsistencyChecks._get_caller()
         if caller == "__setitem__":
-            return value >= 0
+            if value is not None:
+                return value >= 0
+            else:
+                return False
 
         return True
 
-    @staticmethod
-    def get_arbitrary_max(max_vals: np.ndarray) -> Callable[[NumpyPatchGrid, Optional[GridCoordinate], Optional[Content]], Union[bool. np.ndarray]]:
-        class _arbitrary_max:
-            def __init__(self, max_vals: np.ndarray):
-                self.max_vals = max_vals
-
-            def lteq_arb(space: NumpyPatchGrid, coord: Optional[GridCoordinate], value: Optional[Content]) -> Union[bool. np.ndarray]:
-                if coord is None:
-                    return space._grid <= self.max_vals
-
-                caller = ConsistencyChecks._get_caller()
-                print("lteq_arb got caller: {}".format(caller))
-                if caller == "__setitem__":
-                    return value <= self.max_vals[coord]
 
 # An altrnative path would be to have NumpyPatchGrid actually extend numpy.ndarray
 # but I have some doubts. E.g. implementing consistency checks would require wrapping
@@ -1055,14 +1007,14 @@ class NumpyPatchConsistencyChecks(ConsistencyChecks):
 # doesn't save work.  Worse, would have to disable e.g. being able to reshape,
 # in-place sort, and changing of various lower-level flags etc.  But it would be
 # neat if we just extended it...
-class NumpyPatchGrid(_PositionalPatchSpace):
-    def __init__(self, init_val: np.ndarray, torus: bool, **kwargs):
-        super().__init__(**kwargs)
-        self.torus = torus
-        if init_val.ndim != 2:
+class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
+    def __init__(self, init_val: np.ndarray, **kwargs):
+        _grid = np.array(init_val)  # We don't need no stinkin' matrices here
+        _height, _width = _grid.shape
+        super().__init__(height=_height, width=_width, **kwargs)
+        if _grid.ndim != 2:
             raise TypeError("NumericPatchGrid may only be initilialized with a ndarray of dimension 2")
-        self._grid = np.array(init_val)  # We don't need no stinkin' matrices here
-        self.height, self.width = self._grid.shape
+        self._grid = _grid
 
     def _verify_other(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> Union[np.ndarray, int, float]:
         if isinstance(other, NumpyPatchGrid) or isinstance(other, np.ndarray):
@@ -1098,21 +1050,30 @@ class NumpyPatchGrid(_PositionalPatchSpace):
         self._grid **= self._verify_other(other)
         return self
 
-    def __ipow__(self, other: Any) -> _PatchSpace:
-        """Element-by-element power of values of one _PatchSpace by another
-        _PatchSpace, scalar, etc."""
+    def __iand__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
+        self._grid &= self._verify_other(other)
+        return self
 
-    def __iand__(self, other: Any) -> _PatchSpace:
-        """And values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+    def __ior__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
+        self._grid |= self._verify_other(other)
+        return self
 
-    def __ior__(self, other: Any) -> _PatchSpace:
-        """Or values of one _PatchSpace, scalar, etc. to another _PatchSpace"""
+    def __ixor__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
+        self._grid ^= self._verify_other(other)
+        return self
 
-    def __ixor__(self, other: Any) -> _PatchSpace:
+    @property
+    def default_value(self) -> Optional[Content]:
+        return None
 
+    def content(self) -> Iterator[Content]:
+        return iter(self._grid)
+
+    def all(self) -> Iterator[Tuple[Position, Optional[Content]]]:
+        return np.ndenumerate(self._grid)
 
     def __getitem__(self, pos: GridCoordinate) -> Content:
-        return self._grid[self._verify_coord(pos)]
+        return self._grid[pos]
 
     def __setitem__(self, pos: GridCoordinate, content: Content) -> None:
         pos = cast(GridCoordinate, self._verify_coord(pos))
