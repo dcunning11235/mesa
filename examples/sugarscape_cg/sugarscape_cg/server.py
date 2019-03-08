@@ -1,7 +1,7 @@
 from mesa.visualization.ModularVisualization import ModularServer
 from mesa.visualization.modules import CanvasGrid, ChartModule
 
-from .agents import SsAgent, Sugar
+from .agents import SsAgent
 from .model import SugarscapeCg
 
 color_dic = {4: "#005C00",
@@ -21,6 +21,7 @@ def SsAgent_portrayal(agent):
         portrayal["scale"] = 0.9
         portrayal["Layer"] = 1
 
+    '''
     elif type(agent) is Sugar:
         if agent.amount != 0:
             portrayal["Color"] = color_dic[agent.amount]
@@ -31,7 +32,8 @@ def SsAgent_portrayal(agent):
         portrayal["Layer"] = 0
         portrayal["w"] = 1
         portrayal["h"] = 1
-
+    '''
+    
     return portrayal
 
 

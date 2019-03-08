@@ -23,9 +23,10 @@ Distance = Union[int, float]
 GridCoordinate = Tuple[int, int]
 ContinuousCoordinate = Tuple[float, float]
 
-class LayeredPosition(NamedTuple):
-    layer: str
-    pos: Union[Position, Content]
+#class LayeredPosition(NamedTuple):
+#    layer: str
+#    pos: Union[Position, Content]
+LayeredPosition = Tuple[str, Union[Position, Content]]
 
 
 # Relying on Metric to do two actually different things... to allow _Metric
@@ -109,6 +110,24 @@ class _Metric(ABC):
         return iter([])
 
 
+class NullMetric(_Metric):
+    @classmethod
+    def distance(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Distance:
+        return 0
+
+    @classmethod
+    def path_length(cls, path: Iterator[Position], space: _AbstractSpace) -> Distance:
+        return 0
+
+    @classmethod
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace) -> Iterator[Position]:
+        return iter([])
+
+    @classmethod
+    def neighborhood(cls, center: Position, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Union[Iterator[Position], _AbstractSpace]:
+        return iter([])
+
+
 # I think I really need to step back here and think about the idea of a network vs
 # a space.  A network of agents is actually a very different thing than a network
 # or grid or "space" of positons that Agents may (or may not) occupy, singularly
@@ -158,7 +177,7 @@ class _PositionalSpace(_AbstractSpace):
         intializes a point/cell/etc. such as set(), 0, None, etc."""
 
     @abstractmethod
-    def reduce_position(self, pos_or_content: Union[Position, Content]) -> Position:
+    def reduce_position(self, pos_or_content: Union[Position, Content]) -> Union[Position, Content]:
         """In cases where coordinate systems can have multiple Position values
         that refer to the same position, reduce_position should return the
         canonical value for a passed position, possibly raising an exception if
@@ -469,34 +488,53 @@ class LayeredSpace(_PositionalAgentSpace):
     """
     LayeredSpace is a composite of _AbstractSpace's, each named.
     """
-    def __init__(self, layers: Dict[str, _PositionalSpace] = {}, order: List[str] = []):
-        super().__init__()
+    def __init__(self, layers: Dict[str, _PositionalSpace] = {}, order: List[str] = [], props: Dict[str, Any] = {}):
+        super().__init__(metric=NullMetric)
         self.layers: Dict[str, _PositionalSpace] = layers
         self.order: List[str] = order
         self._agent_to_layer: Dict[Agent, str] = {}
+        self.props: Dict[str, Any] = props
+
+    @staticmethod
+    def is_lp(pos: Any) -> bool:
+        return isinstance(pos, tuple) and len(pos) == 2 and isinstance(pos[0], str)
+
+    def __getattr__(self, attr):
+        if attr in self.props:
+            return self.props[attr]
+        elif len(self.order) > 0:
+            for layer in self.order:
+                if hasattr(self.layers[layer], attr):
+                    return getattr(self.layers[layer], attr)
+        else:
+            for layer in self.layers.values():
+                if hasattr(layer, attr):
+                    return getattr(layer, attr)
+
+        raise AttributeError("'LayeredSpace' object has no attribute '{}'".format(attr))
 
     def __getitem__(self, pos: Union[str, LayeredPosition]) -> Union[_AbstractSpace, Content]:
         if isinstance(pos, str):
             return self.layers[pos]
         else:
-            return self.layers[pos.layer][pos.pos]
+            return self.layers[pos[0]][pos[1]]
 
     def __setitem__(self, pos: LayeredPosition, content: Content) -> None:
-        self.layers[pos.layer][pos.pos] = content
+        self.layers[pos[0]][pos[1]] = content
         if isinstance(content, Agent):
-            self._agent_to_layer[content] = pos.layer
+            self._agent_to_layer[content] = pos[0]
 
     def __delitem__(self, pos_or_content: Union[LayeredPosition, Content]) -> None:
-        if isinstance(pos_or_content, LayeredPosition):
-            del self.layers[pos_or_content.layer][pos_or_content.pos]
+        if self.is_lp(pos_or_content):
+            del self.layers[pos_or_content[0]][pos_or_content[1]]
         else:
             for l in self.layers.values():
                 if isinstance(l, _PositionalAgentSpace) and pos_or_content in l:
                     del l[pos_or_content]
 
     def __contains__(self, pos_or_content: Union[str, LayeredPosition, Content]) -> bool:
-        if isinstance(pos_or_content, LayeredPosition):
-            return pos_or_content.pos in self.layers[pos_or_content.layer]
+        if self.is_lp(pos_or_content):
+            return pos_or_content[1] in self.layers[pos_or_content[0]]
         elif isinstance(pos_or_content, str):
             return pos_or_content in self.layers
         else:
@@ -546,11 +584,11 @@ class LayeredSpace(_PositionalAgentSpace):
 
     def place_agent(self, pos: LayeredPosition, agent: Agent) -> None:
         """Place an agent at a specific position."""
-        if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
-            cast(_PositionalAgentSpace, self.layers[pos.layer]).place_agent(agent, pos.pos)
-            self._agent_to_layer[agent] = pos.layer
+        if isinstance(self.layers[pos[0]], _PositionalAgentSpace):
+            cast(_PositionalAgentSpace, self.layers[pos[0]]).place_agent(pos[1], agent)
+            self._agent_to_layer[agent] = pos[0]
         else:
-            raise TypeError("Cannot add agent to layer '{}' because it is not of type _PositionalAgentSpace".format(pos.layer))
+            raise TypeError("Cannot add agent to layer '{}' because it is not of type _PositionalAgentSpace".format(pos[0]))
 
     def remove_agent(self, agent: Agent) -> None:
         """Remove an agent from the space."""
@@ -566,33 +604,33 @@ class LayeredSpace(_PositionalAgentSpace):
         """Yield the agents at a specific position within a specific layer if
         the passed `pos` is of type `LayeredPosition`, else yield the agents at
         the passed `Position` for all layers"""
-        if isinstance(pos, LayeredPosition):
-            if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
-                return cast(_PositionalAgentSpace, self.layers[pos.layer]).agents_at(pos.pos)
+        if self.is_lp(pos):
+            if isinstance(self.layers[pos[0]], _PositionalAgentSpace):
+                return cast(_PositionalAgentSpace, self.layers[pos[0]]).agents_at(pos[1])
             else:
                 raise TypeError("Cannot return agents from layer '{}', it is not \
-                    an instance of _PositionalAgentSpace.".format(pos.layer))
+                    an instance of _PositionalAgentSpace.".format(pos[0]))
         else:
             return chain(*[l.agents_at(pos) for l in self.layers.values() if isinstance(l, _PositionalAgentSpace)])
 
     def count_agents_at(self, pos: Union[Position, LayeredPosition]) -> int:
-        if isinstance(pos, LayeredPosition):
-            if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
-                return cast(_PositionalAgentSpace, self.layers[pos.layer]).count_agents_at(pos.pos)
+        if self.is_lp(pos):
+            if isinstance(self.layers[pos[0]], _PositionalAgentSpace):
+                return cast(_PositionalAgentSpace, self.layers[pos[0]]).count_agents_at(pos[1])
             else:
                 raise TypeError("Cannot return agents from layer '{}', it is not \
-                    an instance of _PositionalAgentSpace.".format(pos.layer))
+                    an instance of _PositionalAgentSpace.".format(pos[0]))
         else:
             return sum([l.count_agents_at(pos) for l in self.layers.values() if isinstance(l, _PositionalAgentSpace)])
 
     def neighbors_at(self, pos: Union[Position, LayeredPosition], radius: Distance = 1, include_center: bool = True) -> Iterator[Tuple[Position, Agent]]:
         """Yield the agents in proximity to a position."""
-        if isinstance(pos, LayeredPosition):
-            if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
-                return cast(_PositionalAgentSpace, self.layers[pos.layer]).neighbors_at(pos.pos, radius, include_center)
+        if self.is_lp(pos):
+            if isinstance(self.layers[pos[0]], _PositionalAgentSpace):
+                return cast(_PositionalAgentSpace, self.layers[pos[0]]).neighbors_at(pos[1], radius, include_center)
             else:
                 raise TypeError("Cannot get neighbors at pos '{}' in layer '{}' \
-                    because it is not of type _PositionalAgentSpace".format(pos.pos, pos.layer))
+                    because it is not of type _PositionalAgentSpace".format(pos[1], pos[0]))
         else:
             # Hrrrm.... two ways to do this.  Yield everything in proximity on
             # each layer, or yield everything in proximity on positions common
@@ -605,12 +643,12 @@ class LayeredSpace(_PositionalAgentSpace):
 
     def neighborhood_at(self, pos: Union[Position, LayeredPosition], radius: Distance = 1, include_center: bool = True) -> Union[Iterator[Position], _PositionalSpace]:
         """Yield the neighborhood of an agent."""
-        if isinstance(pos, LayeredPosition):
-            if isinstance(self.layers[pos.layer], _PositionalAgentSpace):
-                return cast(_PositionalAgentSpace, self.layers[pos.layer]).neighborhood_at(pos.pos, radius, include_center)
+        if self.is_lp(pos):
+            if isinstance(self.layers[pos[0]], _PositionalAgentSpace):
+                return cast(_PositionalAgentSpace, self.layers[pos[0]]).neighborhood_at(pos[1], radius, include_center)
             else:
                 raise TypeError("Cannot get neighborhood at pos '{}' in layer '{}' \
-                    because it is not of type _PositionalAgentSpace".format(pos.pos, pos.layer))
+                    because it is not of type _PositionalAgentSpace".format(pos[1], pos[0]))
         else:
             # Hrrrm.... two ways to do this.  Yield everything in proximity on
             # each layer, or yield everything in proximity on positions common
@@ -621,15 +659,23 @@ class LayeredSpace(_PositionalAgentSpace):
         """Yield the neighborhood of an agent."""
         return cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_self)
 
-    def __iter__
+    def __iter__(self) -> Iterator[Union[Position, Content]]:
+        return chain(*[map(lambda item: (layer_name, item),  iter(layer)) for layer_name, layer in self.layers.items()])
 
-    def __missing__
+    def __missing__(self, pos: Union[Position, LayeredPosition]) -> Optional[Content]:
+        if self.is_lp(pos):
+            return self.layers[pos[0]].__missing__(pos[1])
 
-    def default_value
+        return None
 
-    def is_continuous
+    def default_value(self) -> Optional[Content]:
+        return None
 
-    def reduce_position
+    def is_continuous(self) -> bool:
+        return len(self.layers) > 0 and all([layer.is_continuous for layer in self.layers.values()])
+
+    def reduce_position(self, pos_or_content: LayeredPosition) -> LayeredPosition:
+        return (pos_or_content[0], self.layers[pos_or_content[0]].reduce_position(pos_or_content[1]))
 
 
 class EuclidianGridMetric(_Metric):
@@ -707,7 +753,7 @@ class _Grid(_PositionalSpace):
         self.height = height
         self.torus = torus
 
-    def reduce_position(self, pos_or_content: Union[Position, Content], raise_exception: bool = True) -> Position:
+    def reduce_position(self, pos_or_content: Union[Position, Content], raise_exception: bool = True) -> Union[Position, Content]:
         pos = cast(GridCoordinate, pos_or_content)
         if 0 <= pos[0] < self.width and 0 <= pos[1] < self.height:
             return pos
@@ -874,7 +920,7 @@ class PositionalAgentNetworkX(_PositionalAgentSpace):
     def __iter__(self) -> Iterator[Union[Position, Content]]:
         return iter(self._graph.nodes)
 
-    def reduce_position(self, pos_or_content: Union[Position, Content]) -> Position:
+    def reduce_position(self, pos_or_content: Union[Position, Content]) -> Union[Position, Content]:
         if pos_or_content not in self._graph:
             raise LookupError("'{}' is not a part of the graph".format(pos_or_content))
 
@@ -975,5 +1021,5 @@ class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
         return map(lambda npos: self[npos], self.neighborhood_at(pos, radius, include_center))
 
     def neighbors_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Iterator[Content]:
-        self_pos = self.base_space.find_agent(content)
+        self_pos = cast(_PositionalAgentSpace, self.base_space).find_agent(content)
         return self.neighbors_at(self_pos, radius, include_self)

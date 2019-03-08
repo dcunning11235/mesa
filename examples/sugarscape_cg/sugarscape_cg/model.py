@@ -54,10 +54,8 @@ class SugarscapeCg(Model):
         sugar_max_distribution = np.genfromtxt("sugarscape_cg/sugar-map.txt")
         agent_space = Grid(height=self.height, width=self.width, torus=False)
         sugar_patches = SugarPatchGrid(max_values=sugar_max_distribution, init_val=np.ones(sugar_max_distribution.shape, dtype=int), torus=False, base_space=agent_space)
-        self.grid = LayeredSpace({"agents": agent_space,
-                                "sugar": sugar_patches})
+        self.grid = LayeredSpace({"agents": agent_space, "sugar": sugar_patches})
         self.schedule.add(sugar_patches)
-
         self.datacollector = DataCollector({"SsAgent": lambda m: m.schedule.get_agent_count(), })
 
         # Create agent:
@@ -67,8 +65,8 @@ class SugarscapeCg(Model):
             sugar = self.random.randrange(6, 25)
             metabolism = self.random.randrange(2, 4)
             vision = self.random.randrange(1, 6)
-            ssa = SsAgent((x, y), self, False, sugar, metabolism, vision)
-            self.grid.place_agent(ssa, (x, y))
+            ssa = SsAgent(self, sugar, metabolism, vision)
+            self.grid.place_agent(("agents", (x, y)), ssa)
             self.schedule.add(ssa)
 
         self.running = True
@@ -80,13 +78,13 @@ class SugarscapeCg(Model):
         self.datacollector.collect(self)
         if self.verbose:
             print([self.schedule.time,
-                   self.schedule.get_breed_count(SsAgent)])
+                   self.schedule.get_agent()])
 
     def run_model(self, step_count=200):
 
         if self.verbose:
             print('Initial number Sugarscape Agent: ',
-                  self.schedule.get_breed_count(SsAgent))
+                  self.schedule.get_agent_count())
 
         for i in range(step_count):
             self.step()
@@ -94,4 +92,4 @@ class SugarscapeCg(Model):
         if self.verbose:
             print('')
             print('Final number Sugarscape Agent: ',
-                  self.schedule.get_breed_count(SsAgent))
+                  self.schedule.get_agent_count())

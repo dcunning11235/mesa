@@ -1,56 +1,39 @@
-import math
-
 from mesa import Agent
 
-
-def get_distance(pos_1, pos_2):
-    """ Get the distance between two point
-
-    Args:
-        pos_1, pos_2: Coordinate tuples for both points.
-
-    """
-    x1, y1 = pos_1
-    x2, y2 = pos_2
-    dx = x1 - x2
-    dy = y1 - y2
-    return math.sqrt(dx ** 2 + dy ** 2)
-
-
 class SsAgent(Agent):
-    def __init__(self, pos, model, moore=False, sugar=0, metabolism=0, vision=0):
-        super().__init__(pos, model)
-        self.pos = pos
-        self.moore = moore
+    id_counter = 0
+
+    def __init__(self, model, sugar=0, metabolism=0, vision=0):
+        super().__init__(SsAgent.id_counter, model)
+        SsAgent.id_counter += 1
         self.sugar = sugar
         self.metabolism = metabolism
         self.vision = vision
 
     def get_sugar(self, pos):
-        this_cell = self.model.grid.get_cell_list_contents([pos])
-        for agent in this_cell:
-            if type(agent) is Sugar:
-                return agent
+        return self.model.grid[("sugar", pos)]
 
     def is_occupied(self, pos):
-        this_cell = self.model.grid.get_cell_list_contents([pos])
-        return len(this_cell) > 1
+        return self.model.grid.count_agents_at(pos)
 
     def move(self):
         # Get neighborhood within vision
-        neighbors = [i for i in self.model.grid.get_neighborhood(self.pos, self.moore,
-                False, radius=self.vision) if not self.is_occupied(i)]
-        neighbors.append(self.pos)
+        neighborhood = self.model.grid.neighborhood_of(self, self.vision)
+
         # Look for location with the most sugar
-        max_sugar = max([self.get_sugar(pos).amount for pos in neighbors])
-        candidates = [pos for pos in neighbors if self.get_sugar(pos).amount ==
-                max_sugar]
+        max_sugar = max(self.model.grid.neighbors_of(("sugar", self.model.grid.find_agent(self)), self.vision))
+        candidates = [pos for pos in neighborhood if self.get_sugar(pos) == max_sugar]
+
         # Narrow down to the nearest ones
-        min_dist = min([get_distance(self.pos, pos) for pos in candidates])
-        final_candidates = [pos for pos in candidates if get_distance(self.pos,
-            pos) == min_dist]
+        min_dist = min([self.model.grid["agent"].metric.distance(
+                    self.model.grid.find_agent(self), pos) for pos in candidates])
+
+
+        final_candidates = [pos for pos in candidates if self.model.grid["agent"].metric.distance(
+                    self.model.grid.find_agent(self), pos) == mind_dist]
+
         self.random.shuffle(final_candidates)
-        self.model.grid.move_agent(self, final_candidates[0])
+        self.model.grid.move_agent(final_candidates[0], self)
 
     def eat(self):
         sugar_patch = self.get_sugar(self.pos)
@@ -63,13 +46,3 @@ class SsAgent(Agent):
         if self.sugar <= 0:
             self.model.grid._remove_agent(self.pos, self)
             self.model.schedule.remove(self)
-
-
-class Sugar(Agent):
-    def __init__(self, pos, model, max_sugar):
-        super().__init__(pos, model)
-        self.amount = max_sugar
-        self.max_sugar = max_sugar
-
-    def step(self):
-        self.amount = min([self.max_sugar, self.amount + 1])
