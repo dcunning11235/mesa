@@ -28,22 +28,6 @@ class LayeredPosition(NamedTuple):
     pos: Union[Position, Content]
 
 
-# Might use something like this to create a factory for e.g. _Metrics
-# This is not used anywhere yet, this is just...  a scratchpad copy.  A note.
-class UsableByMeta(type):
-    def __init__(cls, name, bases, dct):
-        if not hasattr(cls, 'registry'):
-            cls.registry = {}
-        else:
-            usable_by = getattr(cls, '__usable_by', None)
-            if target__for is not None:
-                if not isinstance(target__for, collections.Iterable):
-                    cls.registry[target__for] = (cls)
-                else:
-                    for tf in target__for:
-                        cls.registry[tf] = (cls)
-
-
 # Relying on Metric to do two actually different things... to allow _Metric
 # subclasses to get e.g. neighborhood, they may need to hold information, i.e.
 # be instantiated.  Example:  A network metric that needs to know the structure
@@ -161,10 +145,6 @@ class _AbstractSpace(ABC):
 
 
 class _PositionalSpace(_AbstractSpace):
-    @abstractmethod
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-
     @property
     @abstractmethod
     def is_continuous(self) -> bool:
@@ -239,14 +219,14 @@ class _PositionalSpace(_AbstractSpace):
 
 class _SocialSpace(_AbstractSpace):
     @abstractmethod
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
 
 
 class _PositionalAgentSpace(_PositionalSpace):
     @abstractmethod
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self._agent_to_pos: Dict[Agent, Position] = {}
 
     def place_agent(self, pos: Position, agent: Agent) -> None:
@@ -317,8 +297,8 @@ class _PositionalAgentSpace(_PositionalSpace):
 
 class _SocialAgentSpace(_SocialSpace):
     @abstractmethod
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
 
 
 class _PatchSpace(_AbstractSpace):
@@ -334,8 +314,9 @@ class _PatchSpace(_AbstractSpace):
     Subclasses must e.g. implement how they are initialized, what backs them, etc.
     """
     @abstractmethod
-    def __init__(self, base_space: _AbstractSpace) -> None:
-        super().__init__(base_space.metric)
+    def __init__(self, base_space: _AbstractSpace, *args, **kwargs) -> None:
+        kwargs["metric"] = base_space.metric
+        super().__init__(*args, **kwargs)
         self.base_space = base_space
         self.steps = 0
 
@@ -466,8 +447,8 @@ class _PatchSpace(_AbstractSpace):
 
 class _PositionalPatchSpace(_PositionalSpace, _PatchSpace):
     @abstractmethod
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
 
     @property
     def is_continuous(self) -> bool:
@@ -640,6 +621,16 @@ class LayeredSpace(_PositionalAgentSpace):
         """Yield the neighborhood of an agent."""
         return cast(_PositionalAgentSpace, self.layers[self._agent_to_layer[agent]]).neighborhood_of(agent, radius, include_self)
 
+    def __iter__
+
+    def __missing__
+
+    def default_value
+
+    def is_continuous
+
+    def reduce_position
+
 
 class EuclidianGridMetric(_Metric):
     @classmethod
@@ -708,10 +699,10 @@ class ChebyshevGridMetric(_Metric):
 # Need to create a e.g. Cartesian abstract class that is a space indexed by (x, y)???
 # class _Grid()...
 class _Grid(_PositionalSpace):
-    def __init__(self, width: int, height: int, torus: bool, **kwargs):
+    def __init__(self, width: int, height: int, torus: bool, *args, **kwargs):
         if "metric" not in kwargs:
             kwargs["metric"] = ChebyshevGridMetric
-        super().__init__(**kwargs)
+        super().__init__(*args, **kwargs)
         self.width = width
         self.height = height
         self.torus = torus
@@ -725,9 +716,15 @@ class _Grid(_PositionalSpace):
 
         raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
 
+    def __iter__(self) -> Iterator[Union[Position, Content]]:
+        for y in range(self.height):
+            for x in range(self.width):
+                yield (x, y)
+
+
 class Grid(_PositionalAgentSpace, _Grid):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._grid: Dict[GridCoordinate, Set] = dict()
 
     @property
@@ -778,11 +775,6 @@ class Grid(_PositionalAgentSpace, _Grid):
     def count_agents_at(self, pos: Position) -> int:
         return len(self[pos])
 
-    def __iter__(self) -> Iterator[Union[Position, Content]]:
-        for y in range(self.height):
-            for x in range(self.width):
-                yield (x, y)
-
 
 class NetworkXMetric(_Metric):
     @classmethod
@@ -799,10 +791,10 @@ class NetworkXMetric(_Metric):
 
 
 class PositionalAgentNetworkX(_PositionalAgentSpace):
-    def __init__(self, graph: Optional[nx.Graph] = None, **kwargs):
+    def __init__(self, graph: Optional[nx.Graph] = None, *args, **kwargs):
         if "metric" not in kwargs:
             kwargs["metric"] = NetworkXMetric
-        super().__init__(**kwargs)
+        super().__init__(*args, **kwargs)
         if graph is None:
             self._graph = nx.Graph()
         else:
@@ -896,10 +888,10 @@ class PositionalAgentNetworkX(_PositionalAgentSpace):
 # in-place sort, and changing of various lower-level flags etc.  But it would be
 # neat if we just extended it...
 class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
-    def __init__(self, init_val: np.ndarray, **kwargs):
+    def __init__(self, init_val: np.ndarray, *args, **kwargs):
         _grid = np.array(init_val)  # We don't need no stinkin' matrices here
         _height, _width = _grid.shape
-        super().__init__(height=_height, width=_width, **kwargs)
+        super().__init__(height=_height, width=_width, *args, **kwargs)
         if _grid.ndim != 2:
             raise TypeError("NumericPatchGrid may only be initilialized with a ndarray of dimension 2")
         self._grid = _grid
@@ -932,6 +924,10 @@ class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
 
     def __itruediv__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
         self._grid /= self._verify_other(other)
+        return self
+
+    def __imod__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
+        self._grid %= self._verify_other(other)
         return self
 
     def __ipow__(self, other: Union[NumpyPatchGrid, np.ndarray, int, float]) -> NumpyPatchGrid:
@@ -971,3 +967,13 @@ class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
         pos = cast(GridCoordinate, self.reduce_position(pos))
 
         self._grid[pos] = self.default_value
+
+    def __missing__(self, pos: Position) -> Optional[Content]:
+        raise LookupError("'{}' is out of bounds for width of {} and height of {}".format(pos, self.width, self.height))
+
+    def neighbors_at(self, pos: Position, radius: Distance = 1, include_center: bool = True) -> Iterator[Content]:
+        return map(lambda npos: self[npos], self.neighborhood_at(pos, radius, include_center))
+
+    def neighbors_of(self, content: Content, radius: Distance = 1, include_self: bool = True) -> Iterator[Content]:
+        self_pos = self.base_space.find_agent(content)
+        return self.neighbors_at(self_pos, radius, include_self)

@@ -1,3 +1,19 @@
+# Might use something like this to create a factory for e.g. _Metrics
+# This is not used anywhere yet, this is just...  a scratchpad copy.  A note.
+class UsableByMeta(type):
+    def __init__(cls, name, bases, dct):
+        if not hasattr(cls, 'registry'):
+            cls.registry = {}
+        else:
+            usable_by = getattr(cls, '__usable_by', None)
+            if target__for is not None:
+                if not isinstance(target__for, collections.Iterable):
+                    cls.registry[target__for] = (cls)
+                else:
+                    for tf in target__for:
+                        cls.registry[tf] = (cls)
+
+
 class ConsistencyChecks:
     """ConsistencyChecks come in two varieties:  vetoing and clamping.  Vetoing
     checks return a bool as to whether the change was allowed to happen.  Clamping

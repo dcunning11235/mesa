@@ -52,8 +52,9 @@ class SugarscapeCg(Model):
         self.schedule = RandomActivation(self)
 
         sugar_max_distribution = np.genfromtxt("sugarscape_cg/sugar-map.txt")
-        sugar_patches = SugarPatchGrid(sugar_max_distribution, torus=False)
-        self.grid = LayeredSpace({"agents": Grid(height=self.height, width=self.width, torus=False),
+        agent_space = Grid(height=self.height, width=self.width, torus=False)
+        sugar_patches = SugarPatchGrid(max_values=sugar_max_distribution, init_val=np.ones(sugar_max_distribution.shape, dtype=int), torus=False, base_space=agent_space)
+        self.grid = LayeredSpace({"agents": agent_space,
                                 "sugar": sugar_patches})
         self.schedule.add(sugar_patches)
 
