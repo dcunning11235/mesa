@@ -85,11 +85,19 @@ class CanvasGrid(VisualizationElement):
         for x in range(model.grid.width):
             for y in range(model.grid.height):
                 cell_objects = model.grid.agents_at((x, y))
+                patch_objects = model.grid.patches_at((x, y))
+
                 for obj in cell_objects:
                     portrayal = self.portrayal_method(obj)
                     if portrayal:
                         portrayal["x"] = x
                         portrayal["y"] = y
                         grid_state[portrayal["Layer"]].append(portrayal)
-
+                for obj in patch_objects:
+                    portrayal = self.portrayal_method(obj)
+                    if portrayal:
+                        portrayal["x"] = x
+                        portrayal["y"] = y
+                        grid_state[portrayal["Layer"]].append(portrayal)
+        
         return grid_state

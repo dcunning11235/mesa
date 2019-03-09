@@ -53,8 +53,9 @@ class SugarscapeCg(Model):
 
         sugar_max_distribution = np.genfromtxt("sugarscape_cg/sugar-map.txt")
         agent_space = Grid(height=self.height, width=self.width, torus=False)
-        sugar_patches = SugarPatchGrid(max_values=sugar_max_distribution, init_val=np.ones(sugar_max_distribution.shape, dtype=int), torus=False, base_space=agent_space)
-        self.grid = LayeredSpace({"agents": agent_space, "sugar": sugar_patches})
+        sugar_patches = SugarPatchGrid(max_values=sugar_max_distribution,
+                                    init_val=np.ones(sugar_max_distribution.shape, dtype=int), torus=False, base_space=agent_space)
+        self.grid = LayeredSpace({"agents": agent_space, "sugar": sugar_patches}, metric=agent_space.metric)
         self.schedule.add(sugar_patches)
         self.datacollector = DataCollector({"SsAgent": lambda m: m.schedule.get_agent_count(), })
 
@@ -77,8 +78,7 @@ class SugarscapeCg(Model):
         # collect data
         self.datacollector.collect(self)
         if self.verbose:
-            print([self.schedule.time,
-                   self.schedule.get_agent()])
+            print([self.schedule.time, self.schedule.get_agent_count()])
 
     def run_model(self, step_count=200):
 

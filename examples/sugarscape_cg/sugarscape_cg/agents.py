@@ -21,28 +21,25 @@ class SsAgent(Agent):
         neighborhood = self.model.grid.neighborhood_of(self, self.vision)
 
         # Look for location with the most sugar
-        max_sugar = max(self.model.grid.neighbors_of(("sugar", self.model.grid.find_agent(self)), self.vision))
+        max_sugar = max(self.model.grid.neighbors_at(("sugar", self.model.grid.find_agent(self)[1]), self.vision))
         candidates = [pos for pos in neighborhood if self.get_sugar(pos) == max_sugar]
 
         # Narrow down to the nearest ones
-        min_dist = min([self.model.grid["agent"].metric.distance(
-                    self.model.grid.find_agent(self), pos) for pos in candidates])
-
-
-        final_candidates = [pos for pos in candidates if self.model.grid["agent"].metric.distance(
-                    self.model.grid.find_agent(self), pos) == mind_dist]
-
-        self.random.shuffle(final_candidates)
-        self.model.grid.move_agent(final_candidates[0], self)
+        min_dist = min([self.model.grid.distance(
+                    self.model.grid.find_agent(self)[1], pos) for pos in candidates])
+        final_candidates = [pos for pos in candidates if self.model.grid.distance(
+                    self.model.grid.find_agent(self)[1], pos) == min_dist]
+        self.model.grid.move_agent(("agents", self.random.choice(final_candidates)), self)
 
     def eat(self):
-        sugar_patch = self.get_sugar(self.pos)
-        self.sugar = self.sugar - self.metabolism + sugar_patch.amount
-        sugar_patch.amount = 0
+        pos = self.model.grid.find_agent(self)[1]
+        sugar = self.get_sugar(pos)
+        self.sugar = self.sugar - self.metabolism + sugar
+        self.model.grid["sugar"][pos] = 0
 
     def step(self):
         self.move()
         self.eat()
         if self.sugar <= 0:
-            self.model.grid._remove_agent(self.pos, self)
+            self.model.grid.remove_agent(self)
             self.model.schedule.remove(self)
