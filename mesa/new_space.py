@@ -963,8 +963,11 @@ class PositionalAgentNetworkX(_PositionalAgentSpace):
 # in-place sort, and changing of various lower-level flags etc.  But it would be
 # neat if we just extended it...
 class NumpyPatchGrid(_PositionalPatchSpace, _Grid):
-    def __init__(self, init_val: np.ndarray, *args, **kwargs):
-        _grid = np.array(init_val)  # We don't need no stinkin' matrices here
+    def __init__(self, init_values: Union[np.ndarray, int, float], *args, **kwargs):
+        if not isinstance(init_values, np.ndarray):
+            _grid = np.full((kwargs["base_space"].height, kwargs["base_space"].height), init_values)
+        else:
+            _grid = np.array(init_values)  # We don't need no stinkin' matrices here
         _height, _width = _grid.shape
         super().__init__(height=_height, width=_width, *args, **kwargs)
         if _grid.ndim != 2:
