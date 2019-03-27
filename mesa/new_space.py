@@ -157,25 +157,25 @@ class _AbstractSpace(ABC):
         """Yield the neighbors of a passed Content, out to some radius.
         Optionally includes the passed 'root' in the results"""
 
-    def distance(self, pos1: Position, pos2: Position) -> Distance:
+    def distance(self, pos1: Position, pos2: Position, **kwargs) -> Distance:
         """Concenience method that calls the method of the same name on this
         instance's metric."""
-        return self.metric.distance(pos1, pos2, self)
+        return self.metric.distance(pos1, pos2, self, kwargs)
 
-    def path_length(self, path: Iterator[Position]) -> Distance:
+    def path_length(self, path: Iterator[Position], **kwargs) -> Distance:
         """Concenience method that calls the method of the same name on this
         instance's metric."""
-        return self.metric.path_length(path, self)
+        return self.metric.path_length(path, self, kwargs)
 
-    def path(self, pos1: Position, pos2: Position,) -> Iterator[Position]:
+    def path(self, pos1: Position, pos2: Position, **kwargs) -> Iterator[Position]:
         """Concenience method that calls the method of the same name on this
         instance's metric."""
-        return self.metric.path(pos1, pos2, self)
+        return self.metric.path(pos1, pos2, self, kwargs)
 
-    def neighborhood(self, center: Position, radius: Distance, include_center: bool = True) -> Union[Iterator[Position], _AbstractSpace]:
+    def neighborhood(self, center: Position, radius: Distance, include_center: bool = True, **kwargs) -> Union[Iterator[Position], _AbstractSpace]:
         """Concenience method that calls the method of the same name on this
         instance's metric."""
-        return self.metric.neighborhood(center, radius, self, include_center)
+        return self.metric.neighborhood(center, radius, self, include_center, kwargs)
 
 
 class _PositionalSpace(_AbstractSpace):
@@ -853,16 +853,28 @@ class Grid(_PositionalAgentSpace, _Grid):
 
 class NetworkXMetric(_Metric):
     @classmethod
-    def distance(cls, node1: Position, node2: Position, space: _AbstractSpace) -> Distance:
+    def distance(cls, node1: Position, node2: Position, space: _AbstractSpace, **kwargs) -> Distance:
         super(NetworkXMetric, cls).distance(node1, node2, space)
 
-        return nx.shortest_path_length(cast(PositionalAgentNetworkX, space)._graph, node1, node2, weight="distance")
+        weight="distance"
+        if "weight" in kwargs:
+            weight = kwargs["weight"]
+        return nx.shortest_path_length(cast(PositionalAgentNetworkX, space)._graph, node1, node2, weight=weight)
 
     @classmethod
-    def neighborhood(cls, root: Position, radius: Distance, space: _AbstractSpace, include_center: bool = True) -> Iterator[Position]:
+    def neighborhood(cls, root: Position, radius: Distance, space: _AbstractSpace, include_center: bool = True, **kwargs) -> Iterator[Position]:
         super(NetworkXMetric, cls).neighborhood(root, radius, space)
 
         return ego_graph(cast(PositionalAgentNetworkX, space)._graph, root, radius, center=include_center, distance="distance").nodes
+
+    @classmethod
+    def path(cls, pos1: Position, pos2: Position, space: _AbstractSpace, **kwargs) -> Iterator[Position]:
+        super(NetworkXMetric, cls).distance(node1, node2, space)
+
+        weight="distance"
+        if "weight" in kwargs:
+            weight = kwargs["weight"]
+        return nx.shortest_path(cast(PositionalAgentNetworkX, space)._graph, node1, node2, weight=weight)
 
 
 class PositionalAgentNetworkX(_PositionalAgentSpace):
